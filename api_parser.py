@@ -12,19 +12,20 @@ def parse_binance_klines(raw_data: List[list], timeframe: str) -> List[Dict[str,
     for entry in raw_data:
         try:
             open_time = int(entry[0])
-            
-            # --- ИЗМЕНЕНИЕ: Берем base_volume (entry[5]) ---
+            open_price = float(entry[1])  # <-- Добавлено
+            high_price = float(entry[2])
+            low_price = float(entry[3])
+            close_price = float(entry[4])
             base_volume = float(entry[5])
-            # --- УБРАНЫ: quoteVolume, taker_buy_quote, buyer_ratio, volumeDelta ---
 
             parsed_list.append({
                 "openTime": open_time,
+                "openPrice": open_price,  # <-- Добавлено
                 "closeTime": int(entry[6]),
-                "highPrice": float(entry[2]),
-                "lowPrice": float(entry[3]),
-                "closePrice": float(entry[4]),
-                # --- ИЗМЕНЕНИЕ: Используем 'volume' ---
-                "volume": round(base_volume, 2), 
+                "highPrice": high_price,
+                "lowPrice": low_price,
+                "closePrice": close_price,
+                "volume": round(base_volume, 2),
             })
         except (ValueError, TypeError, IndexError):
             continue
@@ -44,14 +45,20 @@ def parse_bybit_klines(raw_data: List[list], timeframe: str) -> List[Dict[str, A
     for entry in raw_data:
         try:
             open_time = int(entry[0])
+            open_price = float(entry[1])  # <-- Добавлено
+            high_price = float(entry[2])
+            low_price = float(entry[3])
+            close_price = float(entry[4])
+            base_volume = float(entry[5])
+
             parsed_list.append({
                 "openTime": open_time,
+                "openPrice": open_price,  # <-- Добавлено
                 "closeTime": open_time + interval_ms - 1,
-                "highPrice": float(entry[2]),
-                "lowPrice": float(entry[3]),
-                "closePrice": float(entry[4]),
-                # --- ИЗМЕНЕНИЕ: entry[5] (base volume) вместо entry[6] (quote volume) ---
-                "volume": float(entry[5]),
+                "highPrice": high_price,
+                "lowPrice": low_price,
+                "closePrice": close_price,
+                "volume": float(base_volume),
             })
         except (ValueError, TypeError, IndexError):
             continue

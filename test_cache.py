@@ -2,18 +2,18 @@ import requests
 import logging
 import time
 import asyncio
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 # --- НАСТРОЙКА ---
 BASE_URL = "http://127.0.0.1:8000"
 TIMEFRAME_TO_TEST = '4h'
-CACHE_WAIT_TIMEOUT = 300 # 5 минут
+CACHE_WAIT_TIMEOUT = 600  # 10 минут (увеличено, т.к. 200 монет × 500 свечей — много)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def validate_final_data(data: Dict[str, Any]) -> bool:
+def validate_indicators(data: Dict[str, Any]) -> bool:
     """
-    Максимально подробно проверяет финальную структуру данных, включая все метаданные и индикаторы.
+    Проверяет, что все ожидаемые индикаторы и поля присутствуют в финальной структуре данных.
     """
     try:
         # --- БАЗОВАЯ ПРОВЕРКА СТРУКТУРЫ ---
@@ -29,17 +29,14 @@ def validate_final_data(data: Dict[str, Any]) -> bool:
         first_coin_data = data_list[0]
         symbol = first_coin_data.get("symbol", "Неизвестный символ")
 
-        # --- НОВАЯ ПРОВЕРКА №1: ПОЛНАЯ ВАЛИДАЦИЯ МЕТАДАННЫХ ---
-        # Список всех ожидаемых общих полей
+        # --- ПРОВЕРКА МЕТАДАННЫХ ---
         expected_common_meta_keys = {
             "symbol", "exchanges", "logoUrl", "category", "volatility_index",
             "efficiency_index", "trend_harmony_index", "btc_correlation",
             "returns_skewness", "avg_wick_ratio", "relative_strength_vs_btc",
             "max_drawdown_percent", "data"
         }
-        # Список специфичных для таймфрейма полей (без суффикса)
         expected_tf_meta_keys = {"hurst", "entropy"}
-        
         all_expected_keys = expected_common_meta_keys.union(expected_tf_meta_keys)
 
         missing_keys = [key for key in all_expected_keys if key not in first_coin_data]
@@ -48,25 +45,79 @@ def validate_final_data(data: Dict[str, Any]) -> bool:
             return False
         logging.info(f"  -> УСПЕХ: Все {len(all_expected_keys)} мета-полей для {symbol} на месте.")
 
-        # --- ПРОВЕРКА KLINE ДАННЫХ И ИНДИКАТОРОВ ---
+        # --- ПРОВЕРКА СВЕЧЕЙ И ИНДИКАТОРОВ ---
         candle_list = first_coin_data.get('data', [])
         if not candle_list:
-             logging.warning(f"  -> ВАЛИДАЦИЯ: Список свечей для {symbol} пуст.")
-             return True
-        
-        last_candle = candle_list[-1]
-        expected_candle_keys = {
-            "openTime", "closeTime", "highPrice", "lowPrice", "closePrice",
-            "rsi_14", "adx_14", "di_plus_14", "di_minus_14",
-            "ema_50", "ema_100", "ema_150"
-        }
-        missing_candle_keys = [key for key in expected_candle_keys if key not in last_candle]
-        if missing_candle_keys:
-            logging.error(f"  -> ПРОВАЛ: В последней свече для {symbol} отсутствуют поля: {missing_candle_keys}")
-            return False
-        logging.info(f"  -> УСПЕХ: Все поля в свечах для {symbol} на месте.")
+            logging.warning(f"  -> ВАЛИДАЦИЯ: Список свечей для {symbol} пуст.")
+            return True
 
-        logging.info(f"  -> УСПЕХ ВАЛИДАЦИИ: Финальный формат данных для {symbol} полностью корректен.")
+        last_candle = candle_list[-1]
+
+        # --- СПИСОК ВСЕХ ОЖИДАЕМЫХ ПОЛЕЙ (индикаторов) ---
+        expected_indicator_keys = {
+            # --- ADX ---
+            "adx", "di_plus", "di_minus",
+            # --- VWAP ---
+            "w_avwap", "w_avwap_upper_band", "w_avwap_lower_band",
+            "m_avwap", "m_avwap_upper_band", "m_avwap_lower_band",
+            # --- ATR ---
+            "atr",
+            # --- Bollinger Bands ---
+            "bb_basis", "bb_upper", "bb_lower", "bb_width",
+            # --- CMF ---
+            "cmf", "cmf_ema",
+            # --- EMA ---
+            "ema_50", "ema_100", "ema_150",
+            # --- Highest / Lowest ---
+            "highest_50", "lowest_50",
+            # --- KAMA ---
+            "kama", "kama_sc",
+            # --- Keltner Channel ---
+            "kc_upper", "kc_middle", "kc_lower", "kc_width",
+            # --- MACD ---
+            "macd", "macd_signal", "macd_hist",
+            # --- OBV ---
+            "obv", "obv_ema",
+            # --- RSI ---
+            "rsi",
+            # --- Patterns ---
+            "is_doji", "is_bullish_engulfing", "is_bearish_engulfing", "is_hammer", "is_pinbar",
+            # --- RVWAP ---
+            "rvwap",
+            "rvwap_upper_band_1_0", "rvwap_lower_band_1_0", "rvwap_width_1_0",
+            "rvwap_upper_band_2_0", "rvwap_lower_band_2_0", "rvwap_width_2_0",
+            # --- Slope (EMA) ---
+            "ema_50_slope", "ema_100_slope", "ema_150_slope",
+            # --- VZO ---
+            "vzo",
+            # --- Z-Score ---
+            "closePrice_z_score",
+            "bb_width_z_score",
+            "kc_width_z_score",
+            "rvwap_width_1_0_z_score",
+            "ema_proximity_z_score",
+            # Если 'openInterest' и 'fundingRate' есть — проверяем их z_score тоже
+            # "openInterest_z_score",  # Условно
+            # "fundingRate_z_score",   # Условно
+        }
+
+        # --- Проверяем, есть ли 'openInterest' и 'fundingRate' в свече ---
+        dynamic_keys = set()
+        if 'openInterest' in last_candle:
+            dynamic_keys.add('openInterest_z_score')
+        if 'fundingRate' in last_candle:
+            dynamic_keys.add('fundingRate_z_score')
+
+        expected_indicator_keys.update(dynamic_keys)
+
+        missing_candle_keys = [key for key in expected_indicator_keys if key not in last_candle]
+        if missing_candle_keys:
+            logging.error(f"  -> ПРОВАЛ: В последней свече для {symbol} отсутствуют индикаторы: {missing_candle_keys}")
+            return False
+
+        logging.info(f"  -> УСПЕХ: Все {len(expected_indicator_keys)} индикаторов для {symbol} на месте.")
+
+        logging.info(f"  -> УСПЕХ ВАЛИДАЦИИ: Все индикаторы и поля для {symbol} корректны.")
         return True
 
     except Exception as e:
@@ -76,7 +127,7 @@ def validate_final_data(data: Dict[str, Any]) -> bool:
 
 async def main_test():
     """
-    Основная асинхронная функция для проведения теста.
+    Основная асинхронная функция для проведения теста индикаторов.
     """
     start_time = time.time()
     
@@ -102,23 +153,26 @@ async def main_test():
             if response.status_code == 200:
                 logging.info(f"  -> УСПЕХ: Данные появились в кэше!")
                 
-                logging.info(f"\n--- Шаг 3: Финальная проверка и валидация кэша ---")
-                validate_final_data(response.json())
+                logging.info(f"\n--- Шаг 3: Проверка всех индикаторов ---")
+                is_valid = validate_indicators(response.json())
                 
-                total_time = time.time() - start_time
-                logging.info(f"\n--- Общее время выполнения задачи: {total_time:.2f} секунд ---")
+                if is_valid:
+                    total_time = time.time() - start_time
+                    logging.info(f"\n--- ТЕСТ УСПЕШЕН: Все индикаторы присутствуют! Общее время: {total_time:.2f} сек. ---")
+                else:
+                    logging.critical(f"\n--- ТЕСТ ПРОВАЛЕН: Не все индикаторы присутствуют. ---")
+                
                 return
                 
-            logging.info(f"  -> ОЖИДАНИЕ: Кэш пока пуст (404). Ждем 5 секунд...")
-            await asyncio.sleep(5)
+            logging.info(f"  -> ОЖИДАНИЕ: Кэш пока пуст (404). Ждем 10 секунд...")
+            await asyncio.sleep(10)
             
         except requests.exceptions.RequestException as e:
             logging.error(f"  -> ОШИБКА: Не удалось подключиться к серверу для проверки кэша. {e}")
-            await asyncio.sleep(5)
+            await asyncio.sleep(10)
 
     logging.critical(f"--- ПРОВАЛ: Данные не появились в кэше за {CACHE_WAIT_TIMEOUT} секунд. ---")
 
 
 if __name__ == "__main__":
     asyncio.run(main_test())
-

@@ -107,8 +107,9 @@ def add_indicators(market_data: Dict[str, Any]) -> Dict[str, Any]:  # <-- ✅ И
             df['closePrice'] = pd.to_numeric(df['closePrice'])
             df['highPrice'] = pd.to_numeric(df['highPrice'])
             df['lowPrice'] = pd.to_numeric(df['lowPrice'])
+            df['openPrice'] = pd.to_numeric(df['openPrice'])  # <-- Добавить эту строку
 
-            volume_key = 'quoteVolume'
+            volume_key = 'volume'
             if volume_key not in df.columns:
                 logging.warning(f"Колонка '{volume_key}' отсутствует для {symbol}. Индикаторы, требующие объем, будут пропущены.")
                 df[volume_key] = 0.0
@@ -146,11 +147,13 @@ def add_indicators(market_data: Dict[str, Any]) -> Dict[str, Any]:  # <-- ✅ И
             df['ema_100'] = calculate_ema(close, length=100)
             df['ema_150'] = calculate_ema(close, length=150)
 
-            df['highest_50'] = calculate_highest(high, length=50)
-            df['highest_100'] = calculate_highest(high, length=100)
+            # 7. Highest (Возвращает DataFrame)
+            highest_df = calculate_highest(high, periods=[50, 100])
+            df = pd.concat([df, highest_df], axis=1)
 
-            df['lowest_50'] = calculate_lowest(low, length=50)
-            df['lowest_100'] = calculate_lowest(low, length=100)
+            # 8. Lowest (Возвращает DataFrame)
+            lowest_df = calculate_lowest(low, periods=[50, 100])
+            df = pd.concat([df, lowest_df], axis=1)
 
             kama_series, kama_sc = calculate_kama(close, length=10, fast_length=2, slow_length=30)
             df['kama'] = kama_series
@@ -203,11 +206,11 @@ def add_indicators(market_data: Dict[str, Any]) -> Dict[str, Any]:  # <-- ✅ И
 
             # --- Округление и очистка ---
             indicator_cols = [
-                'adx', 'di_plus', 'di_minus',
+                'adx', 'di_plus', 'di_minus', 'openPrice',
                 'w_avwap', 'w_avwap_upper_band', 'w_avwap_lower_band',
                 'm_avwap', 'm_avwap_upper_band', 'm_avwap_lower_band',
                 'atr', 'bb_basis', 'bb_upper', 'bb_lower', 'bb_width',
-                'cmf', 'cmf_ema', 'ema_50', 'ema_100', 'ema_150', 'highest_50', 'lowest_50', 'kama', 'kama_sc',
+                'cmf', 'cmf_ema', 'ema_50', 'ema_100', 'ema_150', 'highest_50', 'lowest_50', 'highest_100', 'lowest_100', 'kama', 'kama_sc',
                 'kc_upper', 'kc_middle', 'kc_lower', 'kc_width',
                 'macd', 'macd_signal', 'macd_hist',
                 'obv', 'obv_ema',
