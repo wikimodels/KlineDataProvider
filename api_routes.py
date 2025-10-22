@@ -4,12 +4,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Dict
 
-# Импортируем очередь из модуля worker, чтобы добавлять в нее задачи
+# Импортируем очередь из модуля worker
 from worker import task_queue
 # Импортируем функцию для получения данных из кэша
 from cache_manager import get_from_cache
+# Импортируем нашу функцию-очиститель
+from api_utils import make_serializable
 
-# Создаем объект Router, к которому будем привязывать эндпоинты
+# Создаем объект Router
 router = APIRouter()
 
 # --- Модели данных и Конфигурация ---
@@ -36,7 +38,8 @@ async def schedule_market_data_job(request: MarketDataRequest):
 @router.get("/cache/{timeframe}")
 async def get_cached_data(timeframe: str):
     """
-    Возвращает данные из кэша для указанного таймфрейма.
+    Возвращает данные из кэша для указанного таймфрейма, предварительно
+    очистив их для безопасной JSON-сериализации.
     """
     if timeframe not in ALLOWED_TIMEFRAMES:
         raise HTTPException(status_code=400, detail="Недопустимый таймфрейм.")
@@ -44,7 +47,9 @@ async def get_cached_data(timeframe: str):
     cached_data = get_from_cache(timeframe)
     
     if cached_data:
-        return JSONResponse(content=cached_data)
+        # --- ВОТ КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Вызываем очистку перед отправкой ---
+        safe_data = make_serializable(cached_data)
+        return JSONResponse(content=safe_data)
     else:
         raise HTTPException(status_code=404, detail=f"Кэш для таймфрейма '{timeframe}' пуст.")
 
@@ -57,3 +62,4 @@ async def get_queue_status():
 async def health_check():
     """Простой эндпоинт для проверки, что сервер жив."""
     return {"status": "ok"}
+

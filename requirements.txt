@@ -13,3 +13,4 @@ uvicorn[standard]==0.29.0
 tqdm==4.66.4
 pymongo==4.8.0
 aiohttp==3.13.0
+polars==1.34.0
