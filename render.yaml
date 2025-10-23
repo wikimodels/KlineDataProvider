@@ -1,23 +1,27 @@
-# План развертывания для Render
+# План развертывания для Render (адаптирован под ваш пример)
 services:
   
   # 1. Веб-сервис (FastAPI + Worker)
-  # База данных НЕ создается этим файлом.
-  # Вы должны вручную добавить переменную окружения 'DATABASE_URL' в UI Render.
   - type: web
-    name: kline-api
-    runtime: python
-    plan: free # Используйте 'starter' для платного плана
-    pythonVersion: "3.11" # ◀️ Основано на вашем pyproject.toml
+    name: coin-sifter-server   # <-- Имя из вашего примера
+    runtime: python             # <-- 'runtime' - это правильный ключ (вместо 'env')
+    plan: free
+    region: frankfurt           # <-- Регион из вашего примера
     
     buildCommand: "pip install -r requirements.txt"
     
-    # Команда для запуска в продакшене (Gunicorn + Uvicorn)
+    # 'startCommand' из НАШЕЙ прошлой переписки (gunicorn), 
+    # т.к. он лучше подходит для production, чем uvicorn-only
     startCommand: "gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:$PORT"
     
+    # 'healthCheckPath' из вашего примера (он есть в api_routes.py)
+    healthCheckPath: /health
+    
     envVars:
-      # DATABASE_URL будет добавлена вручную в UI Render
-      # Сообщаем Render, какую версию Python использовать при сборке
+      # ВАЖНО: Вы должны добавить DATABASE_URL вручную в UI Render
+      # (Мы НЕ используем fromDatabase, как в вашем примере)
+      
+      # Версия Python из вашего pyproject.toml
       - key: PYTHON_VERSION
         value: "3.11"
 
