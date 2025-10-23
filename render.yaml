@@ -1,0 +1,23 @@
+# План развертывания для Render
+services:
+  
+  # 1. Веб-сервис (FastAPI + Worker)
+  # База данных НЕ создается этим файлом.
+  # Вы должны вручную добавить переменную окружения 'DATABASE_URL' в UI Render.
+  - type: web
+    name: kline-api
+    runtime: python
+    plan: free # Используйте 'starter' для платного плана
+    pythonVersion: "3.11" # ◀️ Основано на вашем pyproject.toml
+    
+    buildCommand: "pip install -r requirements.txt"
+    
+    # Команда для запуска в продакшене (Gunicorn + Uvicorn)
+    startCommand: "gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:$PORT"
+    
+    envVars:
+      # DATABASE_URL будет добавлена вручную в UI Render
+      # Сообщаем Render, какую версию Python использовать при сборке
+      - key: PYTHON_VERSION
+        value: "3.11"
+
