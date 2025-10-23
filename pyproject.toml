@@ -22,7 +22,8 @@ dependencies = [
     "uvicorn[standard] (==0.29.0)",
     "tqdm (==4.66.4)",
     "pymongo (==4.8.0)",
-    "aiohttp (>=3.13.0,<4.0.0)"    
+    "aiohttp (>=3.13.0,<4.0.0)",
+    "httpx (>=0.28.1,<0.29.0)"    
 ]
 
 

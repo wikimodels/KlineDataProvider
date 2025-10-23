@@ -12,7 +12,7 @@ services:
     
     # 'startCommand' из НАШЕЙ прошлой переписки (gunicorn), 
     # т.к. он лучше подходит для production, чем uvicorn-only
-    startCommand: "gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:$PORT"
+    startCommand: "gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:$PORT --log-level=info --log-file=- -u"
     
     # 'healthCheckPath' из вашего примера (он есть в api_routes.py)
     healthCheckPath: /health
