@@ -3,7 +3,7 @@ services:
   
   # 1. Веб-сервис (FastAPI + Worker)
   - type: web
-    name: kline-provider-server   # <-- Имя из вашего примера
+    name: coin-sifter-server   # <-- Имя из вашего примера
     runtime: python             # <-- 'runtime' - это правильный ключ (вместо 'env')
     plan: free
     region: frankfurt           # <-- Регион из вашего примера
@@ -23,5 +23,4 @@ services:
       
       # Версия Python из вашего pyproject.toml
       - key: PYTHON_VERSION
-        value: "3.11"
-
+        value: "3.11.9" 
