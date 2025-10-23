@@ -3,7 +3,7 @@ services:
   
   # 1. Веб-сервис (FastAPI + Worker)
   - type: web
-    name: coin-sifter-server   # <-- Имя из вашего примера
+    name: kline-provider-server   # <-- Имя из вашего примера
     runtime: python             # <-- 'runtime' - это правильный ключ (вместо 'env')
     plan: free
     region: frankfurt           # <-- Регион из вашего примера
