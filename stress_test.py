@@ -6,7 +6,7 @@ import time
 # --- НАСТРОЙКИ ТЕСТА ---
 
 # URL вашего сервера на Render
-SERVER_URL = "https://kline-data-provider-server.onrender.com" 
+SERVER_URL = "https://server.onrender.com" 
 
 # Таймфреймы, которые мы запускаем (согласно вашему запросу)
 TIME_FRAMES_TO_TEST = ['1h', '4h', '8h', '12h', '1d']
