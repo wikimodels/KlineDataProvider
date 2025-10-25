@@ -10,7 +10,9 @@ from api_helpers import fetch_url
 from .logging_setup import logger, oi_fr_error_logger
 
 
-CONCURRENCY_LIMIT = 10 # Ограничение одновременных запросов
+# --- ИЗМЕНЕНИЕ: Снижаем лимит, чтобы избежать бана 429/418 ---
+CONCURRENCY_LIMIT = 3 # Было: 10
+
 
 async def fetch_simple(
     session: aiohttp.ClientSession, 
@@ -102,4 +104,3 @@ async def fetch_bybit_paginated(
     
     # Возвращаем исходный task_info и *объединенный* список данных
     return task_info, all_paginated_data
-
