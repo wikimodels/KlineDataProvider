@@ -8,9 +8,18 @@ from database import get_coins_from_db
 from data_collector import fetch_market_data
 # from indicator_calculator import add_indicators  <-- УДАЛЕНО
 from cache_manager import save_to_cache
+# --- ИЗМЕНЕНИЕ: Импортируем redis_client ---
+from cache_manager import redis_client 
 
 # --- Очередь Задач ---
 task_queue = asyncio.Queue()
+
+# --- ИЗМЕНЕНИЕ: Константы для глобальной блокировки ---
+WORKER_LOCK_KEY = "data_collector_lock"
+# Таймаут блокировки (30 минут) на случай, если воркер умрет,
+# не освободив блокировку.
+WORKER_LOCK_TIMEOUT = 1800 
+
 
 def _enrich_coin_metadata(market_data: Dict[str, Any], coins_from_db: List[Dict]) -> Dict[str, Any]:
     """
@@ -49,60 +58,82 @@ def _enrich_coin_metadata(market_data: Dict[str, Any], coins_from_db: List[Dict]
 
 async def background_worker():
     """
-    Основной рабочий процесс, выполняющий задачи из очереди с детальным логированием.
+    Основной рабочий процесс, выполняющий задачи из очереди с детальным логированием
+    И С ГЛОБАЛЬНОЙ БЛОКИРОВКОЙ.
     """
     while True:
+        # --- ИЗМЕНЕНИЕ: Вся логика обернута в try/finally для task_done() ---
+        # --- НО блокировка проверяется ДО основной работы ---
+        
+        timeframe: str = await task_queue.get()
+        lock_acquired = False
+        
         try:
-            # Логика получения одного таймфрейма из очереди СОХРАНЕНА
-            timeframe: str = await task_queue.get()
-            # logging.info(f"WORKER: Взял задачу для '{timeframe}'. Задач в очереди: {task_queue.qsize()}") # <-- УДАЛЕН ШУМ
+            # --- ИЗМЕНЕНИЕ: Логика проверки и установки блокировки ---
+            if not redis_client:
+                logging.warning(f"WORKER: Redis недоступен, не могу проверить блокировку. Возвращаю '{timeframe}' в очередь.")
+                await asyncio.sleep(10) # Пауза перед возвратом
+                await task_queue.put(timeframe)
+                continue # Переход к finally -> task_done()
+
+            # Пытаемся захватить блокировку
+            # nx=True: установить, только если не существует
+            # ex=WORKER_LOCK_TIMEOUT: установить время жизни
+            lock_acquired = redis_client.set(
+                WORKER_LOCK_KEY, 
+                f"busy_by_{timeframe}", 
+                nx=True, 
+                ex=WORKER_LOCK_TIMEOUT
+            )
+
+            if not lock_acquired:
+                # Блокировка уже установлена другим воркером
+                logging.info(f"WORKER: Другой процесс уже выполняет сбор данных. Возвращаю '{timeframe}' в очередь.")
+                await asyncio.sleep(15) # Пауза, чтобы не спамить проверками
+                await task_queue.put(timeframe)
+                continue # Переход к finally -> task_done()
+            
+            # --- Блокировка получена, выполняем основную логику ---
+            
+            logging.info(f"WORKER: Блокировка получена. Начинаю задачу для '{timeframe}'.")
 
             # --- Шаг 1: Получение данных из БД ---
             coins_from_db = get_coins_from_db(timeframe)
             if not coins_from_db:
                 logging.error(f"WORKER: Не удалось получить монеты из БД для '{timeframe}'. Задача пропущена.")
-                continue
-            # logging.info(f"WORKER: Шаг 1/4 | Получено {len(coins_from_db)} монет из БД.") # <-- УДАЛЕН ШУМ
-
+                continue # Переход к finally
+            
             # --- Шаг 2: Сбор рыночных данных ---
             market_data = await fetch_market_data(coins_from_db, timeframe)
-            # --- ИЗМЕНЕНИЕ: Проверяем market_data (т.к. klines могут отсутствовать, но audit_report будет) ---
             if not market_data:
                 logging.error(f"WORKER: Сборщик рыночных данных вернул пустой ответ для '{timeframe}'. Задача пропущена.")
-                continue
+                continue # Переход к finally
             
-            # Логгируем кол-во, даже если 0
             processed_coins_count = len(market_data.get('data', []))
-            # logging.info(f"WORKER: Шаг 2/4 | Собраны рыночные данные для {processed_coins_count} монет.") # <-- УДАЛЕН ШУМ
 
             # --- Шаг 3: Расчет индикаторов (УДАЛЕН) ---
-            # market_data_with_indicators = add_indicators(market_data) <-- УДАЛЕНО
-            # logging.info(f"WORKER: Шаг 3/4 | Расчет индикаторов пропущен.") # <-- УДАЛЕН ШУМ
             
             # --- Шаг 4: Обогащение метаданных ---
-            # Изменена переменная на 'market_data'
             final_enriched_data = _enrich_coin_metadata(market_data, coins_from_db) 
-            # logging.info(f"WORKER: Шаг 4/4 | Метаданные обогащены.") # <-- УДАЛЕН ШУМ
             
-            # --- ДЕБАГГИНГ ЛОГ (ЛОГИКА СОХРАНЕНА) ---
-            if final_enriched_data.get('data'):
-                example_coin = final_enriched_data['data'][0]
-                example_meta = {k: v for k, v in example_coin.items() if k != 'data'}
-                # logging.info(f"WORKER: Пример обогащенных метаданных для {example_meta.get('symbol')}: {json.dumps(example_meta, indent=2)}") # <-- УДАЛЕН ШУМ
-
-            # --- ВЫЗОВ АУДИТА УДАЛЕН ---
-            # (Логика теперь в data_processing.py)
-
             # --- Шаг 5: Сохранение в кэш (ПЕРЕИМЕНОВАН В ШАГ 4) ---
-            # Эта логика была Шагом 5, теперь она часть Шага 4
             save_to_cache(timeframe, final_enriched_data)
-            # logging.info(f"WORKER: Шаг 4/4 | Обогащенные данные сохранены в кэш.") # <-- УДАЛЕН ШУМ
             
-            # logging.info(f"WORKER: Задача для таймфрейма '{timeframe}' успешно выполнена.") # <-- УДАЛЕН ШУМ
+            logging.info(f"WORKER: Задача для таймфрейма '{timeframe}' успешно выполнена.")
 
         except Exception as e:
-            logging.error(f"WORKER: Критическая ошибка при обработке задачи: {e}", exc_info=True)
+            logging.error(f"WORKER: Критическая ошибка при обработке задачи '{timeframe}': {e}", exc_info=True)
+        
         finally:
+            # --- ИЗМЕНЕНИЕ: Освобождение блокировки ---
+            if lock_acquired:
+                if redis_client:
+                    logging.info(f"WORKER: Освобождаю блокировку (задача: {timeframe}).")
+                    redis_client.delete(WORKER_LOCK_KEY)
+                else:
+                    # Редкий случай: Redis упал МЕЖДУ установкой и снятием
+                    logging.critical(f"WORKER: REDIS НЕДОСТУПЕН! НЕ МОГУ ОСВОБОДИТЬ БЛОКИРОВКУ! Истечет через {WORKER_LOCK_TIMEOUT}с.")
+            
             # Этот вызов теперь ЕДИНСТВЕННЫЙ и гарантированно выполняется 1 раз
+            # Он отмечает, что *попытка* обработки (включая возврат в очередь) завершена.
             task_queue.task_done()
-
