@@ -81,7 +81,7 @@ async def fetch_bybit_paginated(
             _, _, _, json_data = await fetch_url(session, page_task_info)
 
         if not json_data:
-            logger.warning(f"FETCH: json_data пуст для Bybit {data_type} {symbol}, страница {page_count}. Прерываю пагинацию.")
+            logger.warning(f"FETCH: json_data пуст для Bybit {data_type} {symbol}, страница {page_count}. Прерываю пагинацию...")
             break
 
         result_data = json_data.get('result', {})
