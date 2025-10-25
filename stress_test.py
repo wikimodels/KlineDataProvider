@@ -35,7 +35,7 @@ load_dotenv()
 BASE_URL = os.environ.get("BASE_URL")
 
 # Таймфреймы для одновременного тестирования
-TIMEFRAMES_TO_TEST = ['1h', '4h', '8h', '12h', '1d']
+TIMEFRAMES_TO_TEST = ['4h']
 
 # Таймауты (у Render могут быть долгие "холодные" старты)
 # 20 минут = 1200 секунд

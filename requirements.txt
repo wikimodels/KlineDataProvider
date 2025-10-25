@@ -17,3 +17,10 @@ numpy==1.26.4
 numba==0.61.2
 scipy==1.13.1
 hurst==0.0.5
+
+# Кэш и очередь
+upstash-redis==1.5.0
+
+ 
+# Логирование
+python-dotenv==1.1.1
