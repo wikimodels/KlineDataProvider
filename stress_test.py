@@ -1,142 +1,226 @@
 import asyncio
-import httpx
+import aiohttp
 import logging
+import os
 import time
+import json
+from dotenv import load_dotenv
+from typing import Tuple, Dict, Any
 
-# --- НАСТРОЙКИ ТЕСТА ---
-
-# URL вашего сервера на Render
-SERVER_URL = "https://server.onrender.com" 
-
-# Таймфреймы, которые мы запускаем (согласно вашему запросу)
-TIME_FRAMES_TO_TEST = ['12h']
-
-# Эндпоинты
-POST_URL = f"{SERVER_URL}/get-market-data"
-CACHE_URL_TEMPLATE = f"{SERVER_URL}/cache/{{timeframe}}"
-HEALTH_URL = f"{SERVER_URL}/health"
-
-# Таймауты
-POLL_INTERVAL = 20      # Опрашивать кэш каждые 20 секунд
-GLOBAL_TIMEOUT = 15 * 60  # Общий таймаут: 15 минут
-WARM_UP_TIMEOUT = 120   # Таймаут на "прогрев": 2 минуты
-JOB_TRIGGER_TIMEOUT = 90 # Таймаут на запуск задачи (увеличено)
-
-# Настройка логирования
-logging.basicConfig(level=logging.INFO, 
-                    format='%(asctime)s - %(levelname)s - %(message)s',
-                    datefmt='%H:%M:%S')
-
-# --- ЛОГИКА ТЕСТА ---
-
-async def warm_up_server(client: httpx.AsyncClient) -> bool:
+# --- НОВЫЙ КЛАСС-ФИЛЬТР ---
+class TaskNameFilter(logging.Filter):
     """
-    "Прогревает" сервер на бесплатном тарифе Render,
-    пингуя /health, пока он не "проснется".
+    Этот фильтр 'внедряет' имя текущей задачи asyncio в запись лога.
     """
-    logging.info("--- Шаг 0: Прогрев сервера (до 2 минут) ---")
-    start_time = time.time()
-    
-    while time.time() - start_time < WARM_UP_TIMEOUT:
+    def filter(self, record):
         try:
-            response = await client.get(HEALTH_URL, timeout=30)
-            if response.status_code == 200:
-                logging.info("✅ СЕРВЕР ПРОСНУЛСЯ. Начинаем тест.")
-                return True
-        except httpx.RequestError:
-            logging.info("...сервер еще спит, ждем 10 сек...")
-            await asyncio.sleep(10)
-    
-    logging.error("❌ ПРОВАЛ: Сервер не проснулся за 2 минуты.")
-    return False
+            # Пытаемся получить имя задачи
+            task = asyncio.current_task()
+            if task:
+                # Если у задачи есть имя, используем его
+                record.task_name = task.get_name()
+            else:
+                # Если задачи нет (например, выполняется в main)
+                record.task_name = 'main'
+        except RuntimeError:
+            # Случается, если логгирование происходит вне asyncio-цикла
+            record.task_name = 'main'
+        return True
 
-async def trigger_job(client: httpx.AsyncClient, timeframe: str) -> bool:
-    """Отправляет POST-запрос для запуска задачи на сервере."""
+# --- Настройка ---
+# Загружаем переменные из .env файла (должен лежать рядом)
+load_dotenv()
+
+# URL вашего сервиса на Render (берется из .env)
+BASE_URL = os.environ.get("BASE_URL")
+
+# Таймфреймы для одновременного тестирования
+TIMEFRAMES_TO_TEST = ['1h', '4h', '8h', '12h', '1d']
+
+# Таймауты (у Render могут быть долгие "холодные" старты)
+# 20 минут = 1200 секунд
+CACHE_WAIT_TIMEOUT = int(os.environ.get("CACHE_WAIT_TIMEOUT", 1200)) 
+# Интервал проверки кэша
+CACHE_POLL_INTERVAL = int(os.environ.get("CACHE_POLL_INTERVAL", 15))
+
+# Настройка логирования (ФОРМАТ СОХРАНЕН)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - [%(task_name)s] - %(message)s',
+    datefmt='%H:%M:%S'
+)
+log = logging.getLogger()
+
+# --- НОВОЕ: ДОБАВЛЯЕМ ФИЛЬТР ---
+# Это свяжет 'task_name' из asyncio с 'task_name' в логгере
+task_filter = TaskNameFilter()
+for handler in log.handlers:
+    handler.addFilter(task_filter)
+
+
+def validate_audit_report(data: Dict[str, Any], timeframe: str) -> bool:
+    """
+    Проверяет, что 'audit_report' в ответе пустой.
+    """
     try:
-        # Используем увеличенный таймаут
-        response = await client.post(POST_URL, json={"timeframe": timeframe}, timeout=JOB_TRIGGER_TIMEOUT)
-        
-        if response.status_code == 202:
-            logging.info(f"✅ ЗАПУСК: Задача для '{timeframe}' успешно отправлена.")
+        audit_report = data.get("audit_report")
+        if not isinstance(audit_report, dict):
+            log.error(f"'audit_report' отсутствует или не является словарем.")
+            return False
+
+        missing_klines = audit_report.get("missing_klines", [])
+        missing_oi = audit_report.get("missing_oi", [])
+        missing_fr = audit_report.get("missing_fr", [])
+
+        is_success = not missing_klines and not missing_oi and not missing_fr
+
+        if is_success:
+            total_coins = len(data.get("data", []))
+            log.info(f"ВАЛИДАЦИЯ УСПЕШНА: 'audit_report' пуст. Собрано {total_coins} монет.")
             return True
         else:
-            logging.error(f"❌ ЗАПУСК ПРОВАЛЕН: Сервер ответил {response.status_code} для '{timeframe}'.")
+            log.error(f"ВАЛИДАЦИЯ ПРОВАЛЕНА: 'audit_report' содержит ошибки:")
+            if missing_klines:
+                log.error(f"  -> Отсутствуют Klines для {len(missing_klines)} монет.")
+            if missing_oi:
+                log.error(f"  -> Отсутствует OI для {len(missing_oi)} монет.")
+            if missing_fr:
+                log.error(f"  -> Отсутствует FR для {len(missing_fr)} монет.")
+            # Печатаем полный отчет для диагностики
+            log.error(f"Полный audit_report: {json.dumps(audit_report, indent=2)}")
             return False
             
-    except httpx.RequestError as e:
-        logging.error(f"❌ ОШИБКА ЗАПУСКА: Не удалось подключиться к серверу для '{timeframe}'. {e}")
+    except Exception as e:
+        log.error(f"Критическая ошибка валидации JSON: {e}", exc_info=True)
         return False
 
-async def check_cache(client: httpx.AsyncClient, timeframe: str) -> bool:
-    """Опрашивает кэш, пока не получит 200 OK."""
-    url = CACHE_URL_TEMPLATE.format(timeframe=timeframe)
+
+async def run_single_test(session: aiohttp.ClientSession, timeframe: str) -> Tuple[str, bool]:
+    """
+    Выполняет полный цикл теста для одного таймфрейма:
+    1. Запускает задачу (POST)
+    2. Ждет кэш (GET)
+    3. Валидирует 'audit_report'
+    Возвращает (timeframe, success_boolean)
+    """
+    # Устанавливаем имя задачи для логгера
+    # Эта строка по-прежнему важна!
+    asyncio.current_task().set_name(f"TF-{timeframe}")
+    
+    post_url = f"{BASE_URL}/get-market-data"
+    cache_url = f"{BASE_URL}/cache/{timeframe}"
     start_time = time.time()
-    
-    # Считаем 404 подряд, чтобы не спамить лог
-    consecutive_404 = 0
-    
-    while time.time() - start_time < GLOBAL_TIMEOUT:
-        try:
-            response = await client.get(url, timeout=30)
+
+    try:
+        # --- Шаг 1: Запуск задачи (POST) ---
+        log.info(f"Шаг 1: Отправка POST-запроса на /get-market-data...")
+        async with session.post(post_url, json={"timeframe": timeframe}, timeout=30) as response:
             
-            if response.status_code == 200:
-                consecutive_404 = 0
-                data = response.json()
-                if data.get('data'):
-                    logging.info(f"✅ ГОТОВО: Кэш для '{timeframe}' готов и содержит {len(data['data'])} монет.")
-                    return True
-                else:
-                    logging.warning(f"⚠️  Кэш для '{timeframe}' готов, но пуст (0 монет). Проверяем снова...")
-            
-            elif response.status_code == 404:
-                if consecutive_404 % 5 == 0: # Логируем только каждый 5-й 404
-                    logging.info(f"⏳ ОЖИДАНИЕ: Кэш для '{timeframe}' пока пуст (404)...")
-                consecutive_404 += 1
+            if response.status == 202:
+                log.info(f"Шаг 1 УСПЕХ: Задача принята (Статус 202).")
+            elif response.status == 409:
+                log.warning(f"Шаг 1 ПРЕДУПРЕЖДЕНИЕ: Задача уже выполняется (Статус 409). Продолжаем...")
             else:
-                consecutive_404 = 0
-                logging.warning(f"⚠️  ОШИБКА КЭША: Сервер ответил {response.status_code} при проверке '{timeframe}'.")
-                
-        except httpx.RequestError as e:
-            consecutive_404 = 0
-            logging.error(f"❌ ОШИБКА ОПРОСА: Не удалось подключиться для проверки '{timeframe}'. {e}")
-        
-        await asyncio.sleep(POLL_INTERVAL)
+                response_text = await response.text()
+                log.error(f"Шаг 1 ПРОВАЛ: Сервер вернул {response.status}. Ответ: {response_text[:150]}")
+                return timeframe, False
+
+    except asyncio.TimeoutError:
+        log.error(f"Шаг 1 ПРОВАЛ: Таймаут POST-запроса (сервер не ответил за 30с).")
+        return timeframe, False
+    except aiohttp.ClientError as e:
+        log.error(f"Шаг 1 ПРОВАЛ: Ошибка POST-запроса: {e}")
+        return timeframe, False
+
+    # --- Шаг 2: Ожидание кэша (GET) ---
+    log.info(f"Шаг 2: Ожидание кэша (Таймаут {CACHE_WAIT_TIMEOUT}с)...")
+    wait_start_time = time.time()
     
-    logging.error(f"❌ ТАЙМАУТ: Кэш для '{timeframe}' не появился за {GLOBAL_TIMEOUT / 60:.0f} минут.")
-    return False
+    while time.time() - wait_start_time < CACHE_WAIT_TIMEOUT:
+        try:
+            async with session.get(cache_url, timeout=30) as response:
+                
+                if response.status == 200:
+                    log.info(f"Шаг 2 УСПЕХ: Кэш получен (Статус 200)!")
+                    
+                    # --- Шаг 3: Валидация ---
+                    try:
+                        json_data = await response.json()
+                        log.info(f"Шаг 3: Валидация 'audit_report'...")
+                        is_valid = validate_audit_report(json_data, timeframe)
+                        
+                        total_time = time.time() - start_time
+                        log.info(f"Тест завершен за {total_time:.2f}с. Результат: {'УСПЕХ' if is_valid else 'ПРОВАЛ'}")
+                        return timeframe, is_valid
+
+                    except json.JSONDecodeError:
+                        log.error(f"Шаг 3 ПРОВАЛ: Сервер вернул не-JSON ответ: {await response.text()[:150]}...")
+                        return timeframe, False
+                    
+                elif response.status == 404:
+                    log.info(f"Шаг 2 ОЖИДАНИЕ: Кэш пока пуст (404). Проверка через {CACHE_POLL_INTERVAL}с...")
+                else:
+                    log.warning(f"Шаг 2 ОШИБКА ОЖИДАНИЯ: Сервер вернул {response.status}. Повтор...")
+
+        except asyncio.TimeoutError:
+            log.warning(f"Шаг 2 ОШИБКА ОЖИДАНИЯ: Таймаут GET-запроса (сервер не ответил за 30с). Повтор...")
+        except aiohttp.ClientError as e:
+            log.warning(f"Шаг 2 ОШИБКА ОЖИДАНИЯ: Ошибка GET-запроса: {e}. Повтор...")
+
+        await asyncio.sleep(CACHE_POLL_INTERVAL)
+
+    # Если мы вышли из цикла по таймауту
+    log.error(f"Шаг 2 ПРОВАЛ: Таймаут! Кэш не появился за {CACHE_WAIT_TIMEOUT} секунд.")
+    return timeframe, False
+
 
 async def main():
-    """Основная функция для запуска и мониторинга всех задач."""
-    logging.info(f"--- НАЧАЛО СТРЕСС-ТЕСТА ---")
-    logging.info(f"Цель: {SERVER_URL}")
-    logging.info(f"Задачи: {', '.join(TIME_FRAMES_TO_TEST)}")
+    """
+    Главная функция: запускает все тесты параллельно и собирает результаты.
+    """
+    if not BASE_URL:
+        log.critical("ПРОВАЛ: Переменная BASE_URL не найдена в .env файле.")
+        log.critical("Пожалуйста, создайте .env файл и добавьте: BASE_URL=https://ваш-адрес.onrender.com")
+        return
+
+    log.info(f"--- ЗАПУСК СТРЕСС-ТЕСТА ---")
+    log.info(f"Цель: {BASE_URL}")
+    log.info(f"Таймфреймы: {TIMEFRAMES_TO_TEST}")
+    log.info(f"Таймаут на задачу: {CACHE_WAIT_TIMEOUT}с")
     
-    async with httpx.AsyncClient() as client:
-        
-        # --- Шаг 0: Прогрев ---
-        if not await warm_up_server(client):
-            logging.critical("--- ТЕСТ ПРОВАЛЕН: Сервер не ответил на прогрев. ---")
-            return
-        
-        # --- Шаг 1: Запускаем все задачи ---
-        trigger_tasks = [trigger_job(client, tf) for tf in TIME_FRAMES_TO_TEST]
-        trigger_results = await asyncio.gather(*trigger_tasks)
-        
-        if not all(trigger_results):
-            logging.critical("--- ТЕСТ ПРОВАЛЕН: Не удалось запустить одну или несколько задач. ---")
-            return
+    start_time = time.time()
 
-        logging.info("--- Все задачи успешно запущены. Начинаем опрос кэша. ---")
+    # Устанавливаем общий таймаут на *все* операции, включая таймауты подключения
+    session_timeout = aiohttp.ClientTimeout(total=CACHE_WAIT_TIMEOUT + 60)
+    
+    async with aiohttp.ClientSession(timeout=session_timeout) as session:
+        # Создаем список задач
+        tasks = [run_single_test(session, tf) for tf in TIMEFRAMES_TO_TEST]
         
-        # --- Шаг 2: Ожидаем готовности всех кэшей ---
-        check_tasks = [check_cache(client, tf) for tf in TIME_FRAMES_TO_TEST]
-        check_results = await asyncio.gather(*check_tasks)
+        # Запускаем все параллельно
+        results = await asyncio.gather(*tasks)
 
-        if all(check_results):
-            logging.info(f"--- ТЕСТ УСПЕШЕН: Все {len(TIME_FRAMES_TO_TEST)} таймфреймов успешно обработаны. ---")
+    total_duration = time.time() - start_time
+    log.info(f"--- СТРЕСС-ТЕСТ ЗАВЕРШЕН (Общее время: {total_duration:.2f}с) ---")
+    
+    failed_tests = []
+    for timeframe, success in results:
+        if success:
+            log.info(f"  [+] УСПЕХ: {timeframe}")
         else:
-            logging.critical("--- ТЕСТ ПРОВАЛЕН: Один или несколько таймфреймов не были готовы до таймаута. ---")
+            log.error(f"  [-] ПРОВАЛ: {timeframe}")
+            failed_tests.append(timeframe)
+
+    if failed_tests:
+        log.error(f"\nИтог: ПРОВАЛЕНО {len(failed_tests)} из {len(TIMEFRAMES_TO_TEST)} тестов.")
+        exit(1) # Выход с кодом ошибки для CI/CD
+    else:
+        log.info(f"\nИтог: УСПЕХ. Все {len(TIMEFRAMES_TO_TEST)} тестов пройдены.")
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        log.warning("\nТест прерван пользователем.")
 

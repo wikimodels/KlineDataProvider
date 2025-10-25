@@ -24,7 +24,7 @@ async def fetch_market_data(coins: List[Dict], timeframe: str) -> Dict[str, Any]
     4. Объединяет данные
     5. Форматирует финальный ответ
     """
-    # logger.info(f"--- Начинаю новый цикл сбора данных для таймфрейма: {timeframe} ---") # <-- УДАЛЕН ШУМ
+    # logger.info(f"--- Начинаю новый цикл сбора данных для таймфрейма: {timeframe} ---")
 
     # 1. Подготовка задач
     # task_builder решает, какие URL, парсеры и стратегии использовать
@@ -102,12 +102,15 @@ async def fetch_market_data(coins: List[Dict], timeframe: str) -> Dict[str, Any]
             # либо уже объединенный список (для пагинации bybit)
             parsed_result = parser_func(raw_data, timeframe_arg)
             
-            # --- ИСПРАВЛЕНИЕ: Добавлена логика сохранения данных ---
             if not parsed_result:
-                logger.warning(f"PARSER: Парсер вернул пустой список для {symbol} ({data_type}, {exchange}). Raw data size: {len(raw_data)}")             
+                logger.warning(f"PARSER: Парсер вернул пустой список для {symbol} ({data_type}, {exchange}). Raw data size: {len(raw_data)}")
+            
+            # --- ИСПРАВЛЕНИЕ: Эта логика была пропущена ---
+            # Сохраняем результат, ТОЛЬКО если он не пустой
             else:
-                # ЭТА СТРОКА ИСПРАВЛЯЕТ ОШИБКУ "Отсутствуют Klines"
                 processed_data[symbol][data_type] = parsed_result
+            # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+            
 
         except Exception as e:
             # Эта ошибка теперь ловит только ошибки ПАРСИНГА или РАСПАКОВКИ
@@ -124,6 +127,5 @@ async def fetch_market_data(coins: List[Dict], timeframe: str) -> Dict[str, Any]
     # 5. Финальное форматирование
     final_structured_data = data_processing.format_final_structure(merged_data, coins, timeframe)
     
-    # logger.info(f"--- Цикл сбора данных для {timeframe} завершен. ---") # <-- УДАЛЕН ШУМ
+    # logger.info(f"--- Цикл сбора данных для {timeframe} завершен. ---")
     return final_structured_data
-

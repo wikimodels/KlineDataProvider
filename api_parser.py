@@ -105,7 +105,7 @@ def parse_bybit_fr(raw_data: List[Dict], timeframe: str) -> List[Dict[str, Any]]
 # --- OPEN INTEREST PARSERS ---
 
 def parse_binance_oi(raw_data: List[Dict], timeframe: str) -> List[Dict[str, Any]]:
-    """Парсит open interest от Binance, сортирует и удаляет последнюю точку."""
+    """Парсит open interest от Binance и сортирует."""
     parsed_list = []
     interval_ms = get_interval_duration_ms(timeframe)
     for entry in raw_data:
@@ -120,10 +120,11 @@ def parse_binance_oi(raw_data: List[Dict], timeframe: str) -> List[Dict[str, Any
         except (ValueError, TypeError, KeyError):
             continue
     sorted_list = sorted(parsed_list, key=lambda x: x['openTime'])
-    return sorted_list[:-1]
+    # --- ИСПРАВЛЕНИЕ: Убрано [:-1] ---
+    return sorted_list
 
 def parse_bybit_oi(raw_data: List[Dict], timeframe: str) -> List[Dict[str, Any]]:
-    """Парсит open interest от Bybit, сортирует и удаляет последнюю точку."""
+    """Парсит open interest от Bybit и сортирует."""
     parsed_list = []
     interval_ms = get_interval_duration_ms(timeframe)
     for entry in raw_data:
@@ -138,4 +139,6 @@ def parse_bybit_oi(raw_data: List[Dict], timeframe: str) -> List[Dict[str, Any]]
         except (ValueError, TypeError, KeyError):
             continue
     sorted_list = sorted(parsed_list, key=lambda x: x['openTime'])
-    return sorted_list[:-1]
+    # --- ИСПРАВЛЕНИЕ: Убрано [:-1] ---
+    return sorted_list
+
