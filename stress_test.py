@@ -9,7 +9,7 @@ import time
 SERVER_URL = "https://kline-data-provider-server.onrender.com" 
 
 # Таймфреймы, которые мы запускаем (согласно вашему запросу)
-TIME_FRAMES_TO_TEST = ['1h', '4h', '8h', '12h', '1d']
+TIME_FRAMES_TO_TEST = ['12h']
 
 # Эндпоинты
 POST_URL = f"{SERVER_URL}/get-market-data"

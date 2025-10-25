@@ -3,122 +3,75 @@ import logging
 import time
 import asyncio
 from typing import Dict, Any, List
+import json
 
 # --- НАСТРОЙКА ---
 BASE_URL = "http://127.0.0.1:8000"
 TIMEFRAME_TO_TEST = '4h'
-CACHE_WAIT_TIMEOUT = 600  # 10 минут (увеличено, т.к. 200 монет × 500 свечей — много)
+CACHE_WAIT_TIMEOUT = 600  # 10 минут
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def validate_indicators(data: Dict[str, Any]) -> bool:
+def validate_data_collection(data: Dict[str, Any]) -> bool:
     """
-    Проверяет, что все ожидаемые индикаторы и поля присутствуют в финальной структуре данных.
+    Проверяет, что базовая структура данных (Klines + OI + FR)
+    была корректно собрана, ИСПОЛЬЗУЯ 'audit_report'.
+    
+    Эта функция НЕ проверяет метаданные (logoUrl, hurst, entropy и т.д.),
+    а только результат работы data_collector.py (data_processing.py).
     """
     try:
         # --- БАЗОВАЯ ПРОВЕРКА СТРУКТУРЫ ---
-        if not all(k in data for k in ["openTime", "closeTime", "timeframe", "data"]):
-            logging.error("  -> ПРОВАЛ: Отсутствуют ключи верхнего уровня (openTime, closeTime, timeframe, data).")
-            return False
-
-        data_list = data.get('data', [])
-        if not data_list:
-            logging.warning("  -> ВАЛИДАЦИЯ: Список 'data' пуст, но структура верна.")
-            return True
-
-        first_coin_data = data_list[0]
-        symbol = first_coin_data.get("symbol", "Неизвестный символ")
-
-        # --- ПРОВЕРКА МЕТАДАННЫХ ---
-        expected_common_meta_keys = {
-            "symbol", "exchanges", "logoUrl", "category", "volatility_index",
-            "efficiency_index", "trend_harmony_index", "btc_correlation",
-            "returns_skewness", "avg_wick_ratio", "relative_strength_vs_btc",
-            "max_drawdown_percent", "data"
-        }
-        expected_tf_meta_keys = {"hurst", "entropy"}
-        all_expected_keys = expected_common_meta_keys.union(expected_tf_meta_keys)
-
-        missing_keys = [key for key in all_expected_keys if key not in first_coin_data]
+        # Проверяем наличие всех ключей, включая audit_report
+        expected_keys = ["openTime", "closeTime", "timeframe", "data", "audit_report"]
+        missing_keys = [k for k in expected_keys if k not in data]
         if missing_keys:
-            logging.error(f"  -> ПРОВАЛ: У монеты {symbol} отсутствуют мета-поля: {missing_keys}")
-            return False
-        logging.info(f"  -> УСПЕХ: Все {len(all_expected_keys)} мета-полей для {symbol} на месте.")
-
-        # --- ПРОВЕРКА СВЕЧЕЙ И ИНДИКАТОРОВ ---
-        candle_list = first_coin_data.get('data', [])
-        if not candle_list:
-            logging.warning(f"  -> ВАЛИДАЦИЯ: Список свечей для {symbol} пуст.")
-            return True
-
-        last_candle = candle_list[-1]
-
-        # --- СПИСОК ВСЕХ ОЖИДАЕМЫХ ПОЛЕЙ (индикаторов) ---
-        expected_indicator_keys = {
-            # --- ADX ---
-            "adx", "di_plus", "di_minus",
-            # --- VWAP ---
-            "w_avwap", "w_avwap_upper_band", "w_avwap_lower_band",
-            "m_avwap", "m_avwap_upper_band", "m_avwap_lower_band",
-            # --- ATR ---
-            "atr",
-            # --- Bollinger Bands ---
-            "bb_basis", "bb_upper", "bb_lower", "bb_width",
-            # --- CMF ---
-            "cmf", "cmf_ema",
-            # --- EMA ---
-            "ema_50", "ema_100", "ema_150",
-            # --- Highest / Lowest ---
-            "highest_50", "lowest_50",
-            # --- KAMA ---
-            "kama", "kama_sc",
-            # --- Keltner Channel ---
-            "kc_upper", "kc_middle", "kc_lower", "kc_width",
-            # --- MACD ---
-            "macd", "macd_signal", "macd_hist",
-            # --- OBV ---
-            "obv", "obv_ema",
-            # --- RSI ---
-            "rsi",
-            # --- Patterns ---
-            "is_doji", "is_bullish_engulfing", "is_bearish_engulfing", "is_hammer", "is_pinbar",
-            # --- RVWAP ---
-            "rvwap",
-            "rvwap_upper_band_1_0", "rvwap_lower_band_1_0", "rvwap_width_1_0",
-            "rvwap_upper_band_2_0", "rvwap_lower_band_2_0", "rvwap_width_2_0",
-            # --- Slope (EMA) ---
-            "ema_50_slope", "ema_100_slope", "ema_150_slope",
-            # --- VZO ---
-            "vzo",
-            # --- Z-Score ---
-            "closePrice_z_score",
-            "bb_width_z_score",
-            "kc_width_z_score",
-            "rvwap_width_1_0_z_score",
-            "ema_proximity_z_score",
-            # Если 'openInterest' и 'fundingRate' есть — проверяем их z_score тоже
-            # "openInterest_z_score",  # Условно
-            # "fundingRate_z_score",   # Условно
-        }
-
-        # --- Проверяем, есть ли 'openInterest' и 'fundingRate' в свече ---
-        dynamic_keys = set()
-        if 'openInterest' in last_candle:
-            dynamic_keys.add('openInterest_z_score')
-        if 'fundingRate' in last_candle:
-            dynamic_keys.add('fundingRate_z_score')
-
-        expected_indicator_keys.update(dynamic_keys)
-
-        missing_candle_keys = [key for key in expected_indicator_keys if key not in last_candle]
-        if missing_candle_keys:
-            logging.error(f"  -> ПРОВАЛ: В последней свече для {symbol} отсутствуют индикаторы: {missing_candle_keys}")
+            logging.error(f"  -> ПРОВАЛ: Отсутствуют ключи верхнего уровня: {missing_keys}.")
             return False
 
-        logging.info(f"  -> УСПЕХ: Все {len(expected_indicator_keys)} индикаторов для {symbol} на месте.")
+        # --- ПРОВЕРКА АУДИТА ---
+        audit_report = data.get('audit_report')
+        if not isinstance(audit_report, dict):
+            logging.error(f"  -> ПРОВАЛ: 'audit_report' не является словарем. Структура ответа неверна.")
+            return False
+            
+        logging.info("--- Проверка 'audit_report' ---")
+        
+        missing_klines = audit_report.get("missing_klines", [])
+        missing_oi = audit_report.get("missing_oi", [])
+        missing_fr = audit_report.get("missing_fr", [])
 
-        logging.info(f"  -> УСПЕХ ВАЛИДАЦИИ: Все индикаторы и поля для {symbol} корректны.")
-        return True
+        overall_success = True
+        
+        # 1. Проверка Klines
+        if missing_klines:
+            logging.error(f"  -> ПРОВАЛ АУДИТА [KLINES]: Отсутствуют Klines для {len(missing_klines)} монет: {missing_klines}")
+            overall_success = False
+        else:
+            logging.info("  -> УСПЕХ АУДИТА [KLINES]: Все Klines на месте.")
+        
+        # 2. Проверка OI
+        if missing_oi:
+            logging.error(f"  -> ПРОВАЛ АУДИТА [OI]: Отсутствует Open Interest для {len(missing_oi)} монет: {missing_oi}")
+            overall_success = False
+        else:
+            logging.info("  -> УСПЕХ АУДИТА [OI]: Весь Open Interest на месте.")
+
+        # 3. Проверка FR
+        if missing_fr:
+            logging.error(f"  -> ПРОВАЛ АУДИТА [FR]: Отсутствует Funding Rate для {len(missing_fr)} монет: {missing_fr}")
+            overall_success = False
+        else:
+            logging.info("  -> УСПЕХ АУДИТА [FR]: Весь Funding Rate на месте.")
+
+        # --- ИТОГ ---
+        if overall_success:
+            total_coins = len(data.get("data", [])) # Кол-во монет, которые *были* собраны
+            logging.info(f"  -> УСПЕХ ВАЛИДАЦИИ: 'audit_report' пуст. Все данные для {total_coins} монет собраны корректно.")
+        else:
+            logging.error("  -> ПРОВАЛ ВАЛИДАЦИИ: 'audit_report' содержит ошибки.")
+        
+        return overall_success
 
     except Exception as e:
         logging.error(f"  -> КРИТИЧЕСКАЯ ОШИБКА ВАЛИДАЦИИ: {e}", exc_info=True)
@@ -127,7 +80,7 @@ def validate_indicators(data: Dict[str, Any]) -> bool:
 
 async def main_test():
     """
-    Основная асинхронная функция для проведения теста индикаторов.
+    Основная асинхронная функция для проведения теста сбора данных.
     """
     start_time = time.time()
     
@@ -153,14 +106,21 @@ async def main_test():
             if response.status_code == 200:
                 logging.info(f"  -> УСПЕХ: Данные появились в кэше!")
                 
-                logging.info(f"\n--- Шаг 3: Проверка всех индикаторов ---")
-                is_valid = validate_indicators(response.json())
+                logging.info(f"\n--- Шаг 3: Проверка собранных данных (Klines + OI + FR) ---")
+                
+                try:
+                    json_data = response.json()
+                except requests.exceptions.JSONDecodeError:
+                    logging.critical(f"\n--- ТЕСТ ПРОВАЛЕН: Сервер вернул не-JSON ответ. ---")
+                    return
+
+                is_valid = validate_data_collection(json_data)
                 
                 if is_valid:
                     total_time = time.time() - start_time
-                    logging.info(f"\n--- ТЕСТ УСПЕШЕН: Все индикаторы присутствуют! Общее время: {total_time:.2f} сек. ---")
+                    logging.info(f"\n--- ТЕСТ УСПЕШЕН: 'audit_report' чист. Все данные присутствуют! Общее время: {total_time:.2f} сек. ---")
                 else:
-                    logging.critical(f"\n--- ТЕСТ ПРОВАЛЕН: Не все индикаторы присутствуют. ---")
+                    logging.critical(f"\n--- ТЕСТ ПРОВАЛЕН: 'audit_report' сообщил об ошибках. (См. логи выше) ---")
                 
                 return
                 
@@ -168,7 +128,7 @@ async def main_test():
             await asyncio.sleep(10)
             
         except requests.exceptions.RequestException as e:
-            logging.error(f"  -> ОШИБКА: Не удалось подключиться к серверу для проверки кэша. {e}")
+            logging.error(f"  -> ОШИКА: Не удалось подключиться к серверу для проверки кэша. {e}")
             await asyncio.sleep(10)
 
     logging.critical(f"--- ПРОВАЛ: Данные не появились в кэше за {CACHE_WAIT_TIMEOUT} секунд. ---")
