@@ -1,15 +1,17 @@
 import logging
-import os # --- Изменение №1: Добавляем os ---
+import os 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Security
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel
 from typing import List, Dict
 
-# --- Изменение №1: Импорты для воркера, кэша и FR ---
-from worker import task_queue, WORKER_LOCK_KEY # Добавляем WORKER_LOCK_KEY
+# --- Импорты для воркера, кэша и FR ---
+# --- Изменение №1: Убираем task_queue, оставляем WORKER_LOCK_KEY ---
+from worker import WORKER_LOCK_KEY 
 from cache_manager import get_from_cache, redis_client # Добавляем redis_client
 from api_utils import make_serializable
+# -----------------------------------------------------------------
 
 # Импорт Cron-Job функции (fr_fetcher)
 try:
@@ -27,11 +29,19 @@ router = APIRouter()
 class MarketDataRequest(BaseModel):
     timeframe: str
 
-# --- Изменение №1: Обновляем список, убирая '1m', '5m' и т.д. ---
-ALLOWED_TIMEFRAMES = ['1h', '4h', '8h', '12h', '1d']
-# -----------------------------------------------------------
+# --- Изменение №2: Разделение списков разрешенных таймфреймов ---
+# Таймфреймы, для которых можно ЗАПУСТИТЬ сбор (POST)
+POST_TIMEFRAMES = ['1h', '4h', '12h', '1d'] # 8h убран
+# Таймфреймы, из которых можно ПРОЧИТАТЬ кэш (GET)
+GET_TIMEFRAMES = ['1h', '4h', '8h', '12h', '1d'] # 8h оставлен
+# ------------------------------------------------------------------
 
-# --- Изменение №1: Настройка безопасности для Cron-Job ---
+# --- Изменение №1: Добавляем ключ для Redis Queue ---
+REDIS_TASK_QUEUE_KEY = "data_collector_task_queue"
+# -------------------------------------------------
+
+
+# --- Настройка безопасности для Cron-Job ---
 CRON_SECRET = os.environ.get("CRON_SECRET")
 security = HTTPBearer()
 
@@ -56,19 +66,20 @@ def verify_cron_secret(credentials: HTTPBearer = Security(security)):
 
 # --- Определения Эндпоинтов ---
 
-# --- Изменение №1: Обновляем /get-market-data, добавляя проверку блокировки ---
 @router.post("/get-market-data", status_code=202)
 async def schedule_market_data_job(request: MarketDataRequest):
     """
     Принимает запрос на сбор данных, ПРОВЕРЯЕТ БЛОКИРОВКУ,
-    добавляет его в очередь и немедленно отвечает.
+    добавляет его в очередь (теперь в Redis) и немедленно отвечает.
     """
     timeframe = request.timeframe
     log_prefix = f"[{timeframe.upper()}]"
     
-    if timeframe not in ALLOWED_TIMEFRAMES:
-        logging.error(f"{log_prefix} API: Получен недопустимый таймфрейм {timeframe}.")
-        raise HTTPException(status_code=400, detail="Недопустимый таймфрейм.")
+    # --- Изменение №2: Используем POST_TIMEFRAMES ---
+    if timeframe not in POST_TIMEFRAMES:
+        logging.error(f"{log_prefix} API: Получен недопустимый таймфрейм {timeframe} для POST-запроса.")
+        raise HTTPException(status_code=400, detail=f"Таймфрейм '{timeframe}' не может быть запрошен для сбора.")
+    # ---------------------------------------------
         
     logging.info(f"{log_prefix} API: Получен запрос на запуск задачи...")
 
@@ -80,48 +91,62 @@ async def schedule_market_data_job(request: MarketDataRequest):
             detail="Сервис недоступен: Redis (для блокировки) не подключен."
         )
 
-    # Проверяем, не занят ли воркер
+    # --- ИЗМЕНЕНИЕ №1: Исправлена логика обработки блокировки ---
+    
+    lock_status = None # Инициализируем
     try:
+        # Блок try ТЕПЕРЬ содержит *только* сам запрос к Redis
         lock_status = redis_client.get(WORKER_LOCK_KEY)
-        if lock_status:
-            logging.warning(f"{log_prefix} API: Задача отклонена (409). Сборщик уже занят.")
-            raise HTTPException(
-                status_code=409,
-                detail=f"Конфликт: Сборщик уже занят. Статус: {lock_status.decode('utf-8')}"
-            )
-    except Exception as e:
+        
+    except Exception as e: 
+        # Этот блок ТЕПЕРЬ ловит *только* ошибки Redis (например, ConnectionError)
         logging.error(f"{log_prefix} API: Ошибка при проверке блокировки Redis: {e}", exc_info=True)
         raise HTTPException(
-            status_code=500,
+            status_code=500, # Это *корректный* 500, т.к. мы не смогли проверить блокировку
             detail=f"Внутренняя ошибка сервера при проверке блокировки: {e}"
         )
 
-    # Добавляем задачу в очередь
+    # Проверка статуса и вызов 409 вынесены ИЗ блока try
+    if lock_status:
+        logging.warning(f"{log_prefix} API: Задача отклонена (409). Сборщик уже занят.")
+        detail_status = lock_status # Upstash-redis возвращает str
+        # Это исключение (409) теперь НЕ БУДЕТ поймано блоком except Exception
+        raise HTTPException(
+            status_code=409,
+            detail=f"Конфликт: Сборщик уже занят. Статус: {detail_status}"
+        )
+    # --- Конец Изменения №1 ---
+
+
+    # Добавляем задачу в очередь (Этот блок try...except остается без изменений)
     try:
-        await task_queue.put(timeframe)
-        logging.info(f"{log_prefix} API: Задача для {timeframe} успешно добавлена в очередь.")
+        # --- Изменение №1: Меняем asyncio.Queue на Redis List (rpush) ---
+        redis_client.rpush(REDIS_TASK_QUEUE_KEY, timeframe)
+        # -------------------------------------------------------------
+        
+        logging.info(f"{log_prefix} API: Задача для {timeframe} успешно добавлена в очередь Redis.")
         return JSONResponse(
             status_code=202, # Accepted
             content={"message": f"Задача для {timeframe} принята в очередь."}
         )
     except Exception as e:
-        logging.error(f"{log_prefix} API: Не удалось добавить задачу в очередь: {e}", exc_info=True)
+        logging.error(f"{log_prefix} API: Не удалось добавить задачу в очередь Redis: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Внутренняя ошибка сервера при добавлении в очередь: {e}"
         )
-# --- Конец Изменения №1 ---
 
 
 @router.get("/cache/{timeframe}")
 async def get_cached_data(timeframe: str):
     """
-    (Код этой функции не изменен, он уже использует make_serializable)
     Возвращает данные из кэша для указанного таймфрейма, предварительно
     очистив их для безопасной JSON-сериализации.
     """
-    if timeframe not in ALLOWED_TIMEFRAMES:
-        raise HTTPException(status_code=400, detail="Недопустимый таймфрейм.")
+    # --- Изменение №2: Используем GET_TIMEFRAMES ---
+    if timeframe not in GET_TIMEFRAMES:
+        raise HTTPException(status_code=400, detail=f"Таймфрейм '{timeframe}' недопустим для чтения из кэша.")
+    # ---------------------------------------------
     
     cached_data = get_from_cache(timeframe)
     
@@ -133,7 +158,7 @@ async def get_cached_data(timeframe: str):
         raise HTTPException(status_code=404, detail=f"Кэш для таймфрейма '{timeframe}' пуст.")
 
 
-# --- Изменение №1: Новый эндпоинт для Cron-Job ---
+# --- Новый эндпоинт для Cron-Job ---
 @router.post("/api/v1/internal/update-fr")
 async def trigger_fr_update(
     background_tasks: BackgroundTasks,
@@ -155,15 +180,27 @@ async def trigger_fr_update(
         status_code=202, # Accepted
         content={"message": "Задача обновления 'cache:global_fr' принята в очередь."}
     )
-# --- Конец Изменения №1 ---
+# --- Конец Изменения ---
 
 
 @router.get("/queue-status")
 async def get_queue_status():
-    """(Код этой функции не изменен)"""
-    return {"tasks_in_queue": task_queue.qsize()}
+    """
+    Возвращает текущее количество задач в очереди.
+    --- Изменение №1: Читаем длину списка Redis ---
+    """
+    q_size = 0
+    if redis_client:
+        try:
+            q_size = redis_client.llen(REDIS_TASK_QUEUE_KEY)
+        except Exception as e:
+            logging.error(f"[QUEUE_STATUS] Ошибка получения длины очереди Redis: {e}")
+            raise HTTPException(status_code=503, detail="Не удалось получить статус очереди из Redis.")
+            
+    return {"tasks_in_queue": q_size}
+    # ---------------------------------------------
 
 @router.get("/health")
 async def health_check():
-    """(Код этой функции не изменен)"""
+    """Простой эндпоинт для проверки, что сервер жив."""
     return {"status": "ok"}

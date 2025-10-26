@@ -14,10 +14,10 @@ except ImportError:
 
 
 # Лимит одновременных запросов к ОДНОЙ бирже
-CONCURRENCY_LIMIT = 3
+CONCURRENCY_LIMIT = 10
 
 # Таймаут для каждого запроса
-REQUEST_TIMEOUT = 20 # секунд
+REQUEST_TIMEOUT = 15 # секунд
 
 # --- Изменение №1: Добавляем стандартный User-Agent ---
 REQUEST_HEADERS = {

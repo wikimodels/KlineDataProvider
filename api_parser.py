@@ -146,13 +146,13 @@ def parse_bybit_oi(raw_data: List[Dict[str, str]], timeframe: str) -> List[Dict[
 def parse_bybit_fr(raw_data: List[Dict[str, str]], timeframe: str) -> List[Dict[str, Any]]:
     """
     Парсит Funding Rate (FR) от Bybit V5.
-    Формат Bybit: [{"symbol": "BTCUSDT", "fundingRateTime": "123...", "fundingRate": "0.0001"}, ...]
+    Формат Bybit: [{"symbol": "BTCUSDT", "fundingRateTimestamp": "123...", "fundingRate": "0.0001"}, ...]
     """
     parsed_fr = []
     try:
         for item in raw_data:
-            # --- ВАЖНО: Приводим 'fundingRateTime' к 'openTime' ---
-            open_time = int(item["fundingRateTime"])
+            # --- ВАЖНО: Приводим 'fundingRateTimestamp' к 'openTime' ---
+            open_time = int(item["fundingRateTimestamp"])
             # ----------------------------------------------------
             parsed_fr.append({
                 "openTime": open_time,
