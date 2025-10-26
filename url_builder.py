@@ -1,26 +1,72 @@
 """
-Этот модуль централизованно создает URL-адреса для всех необходимых
-API-запросов к Binance и Bybit, основываясь на примерах из JS-файлов.
+Этот модуль отвечает за ФОРМИРОВАНИЕ URL-адресов
+для запросов к API бирж (Binance, Bybit).
 """
 
-# --- Klines (Свечи) ---
-def get_binance_klines_url(symbol: str, interval: str, limit: int = 500) -> str:
-    return f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
+from typing import Optional
 
-def get_bybit_klines_url(symbol: str, interval: str, limit: int = 500) -> str:
-    return f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit={limit}"
+# --- Базовые URL ---
+BINANCE_BASE_URL = "https://fapi.binance.com"
+BYBIT_BASE_URL = "https://api.bybit.com"
 
-# --- Funding Rate (Ставка финансирования) ---
-def get_binance_funding_rate_url(symbol: str, limit: int = 500) -> str:
-    return f"https://fapi.binance.com/fapi/v1/fundingRate?symbol={symbol}&limit={limit}"
+# --- BINANCE URL Builders ---
 
-def get_bybit_funding_rate_url(symbol: str, limit: int = 500) -> str:
-    return f"https://api.bybit.com/v5/market/funding/history?category=linear&symbol={symbol}&limit={limit}"
+def get_binance_klines_url(symbol_api: str, interval: str, limit: int = 400) -> str:
+    """
+    Формирует URL для получения Klines (свечей) с Binance Futures.
+    """
+    return f"{BINANCE_BASE_URL}/fapi/v1/klines?symbol={symbol_api}&interval={interval}&limit={limit}"
 
-# --- Open Interest (Открытый интерес) ---
-def get_binance_open_interest_url(symbol: str, interval: str, limit: int = 500) -> str:
-    return f"https://fapi.binance.com/futures/data/openInterestHist?symbol={symbol}&period={interval}&limit={limit}"
+def get_binance_open_interest_url(symbol_api: str, period: str, limit: int = 400) -> str:
+    """
+    Формирует URL для получения Open Interest (OI) с Binance Futures.
+    """
+    # Убедимся, что лимит не превышает 500 (макс. для Binance OI/FR)
+    limit = min(limit, 500)
+    return f"{BINANCE_BASE_URL}/futures/data/openInterestHist?symbol={symbol_api}&period={period}&limit={limit}"
 
-def get_bybit_open_interest_url(symbol: str, interval: str, limit: int = 500) -> str:
-    # Bybit использует 'intervalTime' для OI
-    return f"https://api.bybit.com/v5/market/open-interest?category=linear&symbol={symbol}&intervalTime={interval}&limit={limit}"
+def get_binance_funding_rate_url(symbol_api: str, limit: int = 400) -> str:
+    """
+    Формирует URL для получения Funding Rate (FR) с Binance Futures.
+    """
+    # Убедимся, что лимит не превышает 500
+    limit = min(limit, 500)
+    return f"{BINANCE_BASE_URL}/fapi/v1/fundingRate?symbol={symbol_api}&limit={limit}"
+
+# --- BYBIT URL Builders ---
+
+def get_bybit_klines_url(symbol_api: str, interval: str, limit: int = 400) -> str:
+    """
+    Формирует URL для получения Klines (свечей) с Bybit V5 (Linear).
+    Bybit использует минуты (1h=60, 4h=240, 1D=D).
+    """
+    interval_map = {
+        '1h': '60',
+        '4h': '240',
+        '8h': '480', # Bybit поддерживает 8h (480)
+        '12h': '720',
+        '1d': 'D'
+    }
+    bybit_interval = interval_map.get(interval, '60') # По умолчанию 1h
+
+    # Bybit V5 Klines: limit (макс 200) устанавливается в fetch_strategies,
+    # так как мы используем пагинацию.
+    # Мы запрашиваем 800 свечей 4h (для 8h),
+    # fetch_bybit_paginated сделает 4 запроса по 200.
+    return f"{BYBIT_BASE_URL}/v5/market/klines?category=linear&symbol={symbol_api}&interval={bybit_interval}"
+
+def get_bybit_open_interest_url(symbol_api: str, period: str, limit: int = 400) -> str:
+    """
+    Формирует URL для получения Open Interest (OI) с Bybit V5 (Linear).
+    Bybit использует intervalType (1h, 4h, ...).
+    """
+    # Bybit V5 OI: limit (макс 200) устанавливается в fetch_strategies.
+    # Bybit использует 'period' (1h, 4h) как 'intervalTime'
+    return f"{BYBIT_BASE_URL}/v5/market/open-interest?category=linear&symbol={symbol_api}&intervalTime={period}"
+
+def get_bybit_funding_rate_url(symbol_api: str, limit: int = 400) -> str:
+    """
+    Формирует URL для получения Funding Rate (FR) с Bybit V5 (Linear).
+    """
+    # Bybit V5 FR: limit (макс 100) устанавливается в fetch_strategies.
+    return f"{BYBIT_BASE_URL}/v5/market/funding/history?category=linear&symbol={symbol_api}"

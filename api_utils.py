@@ -6,6 +6,7 @@ def make_serializable(obj):
     """
     Рекурсивно обходит структуру данных и заменяет несовместимые с JSON
     значения (numpy-типы, inf, nan, Decimal) на безопасные Python-типы.
+    (Этот код взят из твоего файла api_utils.py)
     """
     if isinstance(obj, dict):
         return {key: make_serializable(val) for key, val in obj.items()}
@@ -24,4 +25,3 @@ def make_serializable(obj):
         return obj
     else:
         return obj
-
