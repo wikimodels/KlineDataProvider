@@ -1,0 +1,45 @@
+🏃 Analysis & Triggers
+These endpoints are used to run the analysis and check the logs.
+
+POST /api/v1/trigger
+
+Comment: This is the main endpoint used to kick off the 80+ minute analysis task. It creates a log entry and starts the job in the background.
+
+GET /api/v1/logs
+
+Comment: Returns a JSON list of all previous analysis runs (both completed and failed), sorted by time.
+
+📊 Main Data Endpoints (Coins)
+These are the primary endpoints for fetching the results of the analysis.
+
+GET /api/v1/coins/filtered
+
+Comment: Returns the full JSON data for all coins that passed the analysis filters (e.g., volume) and are not in the blacklist.
+
+GET /api/v1/coins/filtered/csv
+
+Comment: Returns the same data as /coins/filtered, but formatted as a downloadable CSV file.
+
+GET /api/v1/coins/formatted-symbols
+http://127.0.0.1:8000/api/v1/coins/formatted-symbols
+
+Comment: This is the new endpoint you just added. It returns a optimized JSON list specifically for TradingView, with formatted symbols (e.g., "SOLUSDT") and exchange names (e.g., "binance").
+
+📋 Utility & Health Endpoints
+These endpoints provide metadata, reports, and status checks.
+
+GET /api/v1/blacklist
+
+Comment: Returns a JSON list of all symbols currently in the MongoDB blacklist.
+
+GET /api/v1/data-quality-report
+
+Comment: Runs a report on the current data in the cache and identifies any missing data points (e.g., coins with null Hurst values).
+
+GET /api/v1/health
+
+Comment: A simple, unprotected endpoint to check if the API server is running. Used by "pingers" like Uptime Robot.
+
+GET /api/v1/health/last_analysis
+
+Comment: Checks the database and returns the timestamp of the last successful analysis run.

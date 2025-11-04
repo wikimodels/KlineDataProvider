@@ -17,15 +17,20 @@ try:
     from . import task_builder
     from .logging_setup import logger
     
+    # --- ИЗМЕНЕНИЕ: Импортируем новый coin_source ---
+    # (Удален импорт database)
+    from coin_source import get_coins_from_api
+    # ------------------------------------------------
+    
     # Импорты из корневого уровня
-    from database import get_all_unique_coins
     from cache_manager import save_to_cache
 except ImportError:
     # Фоллбэки
     import task_builder
     import logging
     logger = logging.getLogger(__name__)
-    def get_all_unique_coins(): return []
+    # Фоллбэк для coin_source
+    async def get_coins_from_api(): return None 
     def save_to_cache(key, data): pass
 
 # --- Константы (скопированы из worker.py) ---
@@ -33,7 +38,7 @@ FR_CONCURRENCY_LIMIT = 5
 ERROR_RETRY_DELAY = 10
 
 
-async def fetch_funding_rates(coins_from_db: List[Dict]) -> Optional[Dict[str, List[Dict]]]:
+async def fetch_funding_rates(coins_from_api: List[Dict]) -> Optional[Dict[str, List[Dict]]]:
     """
     (Перенесено из worker.py)
     Выполняет сбор данных Funding Rate для всех монет один раз.
@@ -41,7 +46,8 @@ async def fetch_funding_rates(coins_from_db: List[Dict]) -> Optional[Dict[str, L
     logger.info("[GLOBAL_FR_FETCH] Начинаю предварительный сбор Funding Rates...")
     start_time = time.time()
 
-    fr_tasks_to_run = task_builder.prepare_fr_tasks(coins_from_db)
+    # --- Используем coins_from_api ---
+    fr_tasks_to_run = task_builder.prepare_fr_tasks(coins_from_api)
     if not fr_tasks_to_run:
         logger.warning("[GLOBAL_FR_FETCH] Нет задач для сбора FR.")
         return {}
@@ -91,9 +97,13 @@ async def fetch_funding_rates(coins_from_db: List[Dict]) -> Optional[Dict[str, L
             logger.error(f"[GLOBAL_FR_FETCH] Ошибка парсинга FR для {symbol}: {e}", exc_info=True)
 
     end_time = time.time()
+    # Эта переменная используется в логе ниже
     total_fr_tasks = len(fr_tasks_to_run)
+    
+    # --- ИСПРАВЛЕНИЕ: (было 'total_tasks', стало 'total_fr_tasks') ---
     logger.info(f"[GLOBAL_FR_FETCH] Сбор FR завершен за {end_time - start_time:.2f} сек. "
                 f"Успешно: {parsed_fr_count}/{total_fr_tasks}. Ошибок: {failed_fr_count}/{total_fr_tasks}.")
+    # -----------------------------------------------------------------
 
     if failed_fr_count > 0:
         logger.warning(f"[GLOBAL_FR_FETCH] Были ошибки при сборе {failed_fr_count} FR. Данные могут быть неполными.")
@@ -104,20 +114,21 @@ async def fetch_funding_rates(coins_from_db: List[Dict]) -> Optional[Dict[str, L
 async def run_fr_update_process():
     """
     Главная функция, запускаемая эндпоинтом.
-    1. Получает ВСЕ монеты из БД.
+    1. Получает ВСЕ монеты из API (coin_source).
     2. Собирает для них FR.
     3. Сохраняет в 'cache:global_fr'.
     """
     logger.info("[CRON_JOB] Запущена задача обновления cache:global_fr...")
     start_time = time.time()
     try:
-        # 1. Получаем ВСЕ монеты
-        logger.info("[CRON_JOB] 1/3: Запрос *всех* уникальных монет из БД...")
-        all_coins = get_all_unique_coins()
+        # --- Получаем монеты из API ---
+        logger.info("[CRON_JOB] 1/3: Запрос *всех* монет из API (coin-sifter)...")
+        all_coins = await get_coins_from_api()
         if not all_coins:
-             logger.error("[CRON_JOB] 1/3: Не удалось получить монеты из БД (None или []). Обновление FR отменено.")
+             logger.error("[CRON_JOB] 1/3: Не удалось получить монеты из API (None или []). Обновление FR отменено.")
              return
-        logger.info(f"[CRON_JOB] 1/3: Получено {len(all_coins)} уникальных монет.")
+        logger.info(f"[CRON_JOB] 1/3: Получено {len(all_coins)} монет.")
+        # -----------------------------
 
         # 2. Собираем FR
         logger.info("[CRON_JOB] 2/3: Запуск сбора FR...")
@@ -134,7 +145,6 @@ async def run_fr_update_process():
 
         # 3. Сохраняем в кэш
         logger.info("[CRON_JOB] 3/3: Сохранение данных в 'cache:global_fr'...")
-        # (save_to_cache сама сожмет и закодирует в base64)
         save_to_cache('global_fr', fr_data)
         
         end_time = time.time()

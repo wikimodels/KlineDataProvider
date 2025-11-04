@@ -18,61 +18,7 @@ except ImportError:
     logger = logging.getLogger(__name__)
 
 
-# --- Функция _enrich_coin_metadata (без изменений) ---
-def _enrich_coin_metadata(market_data: Dict[str, Any], coins_from_db: List[Dict]) -> Dict[str, Any]:
-    """
-    Обогащает метаданные каждой монеты, добавляя общие и специфичные для
-    таймфрейма аналитические данные из БД. Корректно обрабатывает суффиксы.
-    """
-    if not market_data.get('data') or not coins_from_db:
-        if not market_data.get('data'):
-             logger.warning("ENRICH: Нет 'data' для обогащения.")
-        if not coins_from_db:
-             logger.warning("ENRICH: Нет данных из БД для обогащения.")
-        return market_data
-
-    # Создаем карту для быстрого доступа к деталям монеты по символу
-    # Убираем ':USDT' если он есть в symbol из БД
-    coins_map = {c['symbol'].split(':')[0]: c for c in coins_from_db}
-    data_timeframe = market_data.get('timeframe') # Таймфрейм обогащаемых данных
-    enriched_count = 0
-    known_suffixes = ['_1h', '_4h', '_8h', '_12h', '_1d']
-
-    # Проходим по списку монет в market_data['data']
-    for coin_data in market_data['data']:
-        symbol = coin_data.get('symbol')
-        if not symbol:
-            logger.warning("ENRICH: Обнаружена запись без 'symbol' в market_data['data'].")
-            continue
-
-        # Находим соответствующие детали из БД
-        full_coin_details = coins_map.get(symbol)
-
-        if full_coin_details:
-            enriched_count += 1
-            # Проходим по всем полям из БД
-            for key, value in full_coin_details.items():
-                # Пропускаем ключи, которые не нужно добавлять или которые уже есть
-                if key in ['symbol', 'exchanges', 'created_at']:
-                    continue
-
-                clean_key = key
-                key_has_known_suffix = False
-                # Проверяем, заканчивается ли ключ на известный суффикс
-                for suffix in known_suffixes:
-                    if key.endswith(suffix):
-                        clean_key = key[:-len(suffix)] # Убираем суффикс
-                        key_has_known_suffix = True
-                        break
-
-                # Добавляем ключ (с суффиксом или без) в coin_data,
-                # если его там еще нет (чтобы не перезаписывать данные Klines/OI/FR)
-                target_key = clean_key if key_has_known_suffix else key
-                if target_key not in coin_data:
-                     coin_data[target_key] = value
-
-    return market_data
-# --- Конец _enrich_coin_metadata ---
+# --- Функция _enrich_coin_metadata УДАЛЕНА ---
 
 
 # --- (Функция _aggregate_4h_to_8h УДАЛЕНА и перенесена) ---
@@ -81,6 +27,7 @@ def _enrich_coin_metadata(market_data: Dict[str, Any], coins_from_db: List[Dict]
 def merge_data(processed_data: Dict[str, Dict[str, list]]) -> Dict[str, list]:
     """
     Объединяет klines, oi и fr данные для каждой монеты.
+    (Код этой функции не изменен)
     """
     final_data = {}
 
@@ -143,13 +90,16 @@ def format_final_structure(market_data: Dict[str, list], coins: List[Dict], time
     """
     Форматирует собранные данные в финальную структуру с метаданными,
     включает 'audit_report' и ОБРЕЗАЕТ данные до 399 свечей.
+    
+    (ВАЖНО: coins теперь используется ТОЛЬКО для audit_report и добавления 'exchanges')
     """
     missing_klines_symbols = []
     missing_oi_symbols = []
     missing_fr_symbols = []
     log_prefix = f"[{timeframe.upper()}]"
 
-    expected_symbols = {c['symbol'].split(':')[0] for c in coins}
+    # 'coins' - это список из coin_source (напр. [{'symbol': 'BTCUSDT', 'exchanges': [...]}, ...])
+    expected_symbols = {c['symbol'] for c in coins}
     # Используем ключи из market_data как актуальные символы
     actual_symbols = set(market_data.keys())
 
@@ -183,7 +133,7 @@ def format_final_structure(market_data: Dict[str, list], coins: List[Dict], time
         # Добавляем в итоговый список
         data_list_formatted.append({
             "symbol": symbol,
-            # exchanges добавляются позже при обогащении
+            # exchanges добавляются позже
             "data": final_candles # Добавляем обрезанные свечи
         })
 
@@ -197,7 +147,7 @@ def format_final_structure(market_data: Dict[str, list], coins: List[Dict], time
         "missing_fr": sorted(missing_fr_symbols)
     }
 
-    # Логируем аудит (только ошибки/предупреждения)
+    # (Логирование аудита не изменилось)
     if missing_klines_symbols:
         logging.warning(f"{log_prefix} AUDIT [KLINES]: Отсутствуют Klines для {len(missing_klines_symbols)}/{len(expected_symbols)} монет: {missing_klines_symbols[:5]}...")
 
@@ -214,7 +164,8 @@ def format_final_structure(market_data: Dict[str, list], coins: List[Dict], time
     max_close_time = max(c['closeTime'] for c in all_final_candles if 'closeTime' in c) if all_final_candles else None
 
     # Добавляем exchanges к data_list_formatted перед возвратом
-    exchanges_map = {c['symbol'].split(':')[0]: c['exchanges'] for c in coins}
+    # (Теперь это просто, т.к. coin_source дает нам 'exchanges')
+    exchanges_map = {c['symbol']: c['exchanges'] for c in coins}
     for item in data_list_formatted:
         item['exchanges'] = exchanges_map.get(item['symbol'], [])
 
