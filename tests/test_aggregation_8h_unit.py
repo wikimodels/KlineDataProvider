@@ -16,6 +16,7 @@ class TestAggregate4hTo8h:
                 "lowPrice": 90,
                 "closePrice": 105,
                 "volume": 1000,
+                "volumeDelta": 100.5 # <-- 4. ДОБАВЛЯЕМ ТЕСТОВЫЕ ДАННЫЕ
             },
             {
                 "openTime": 14400000,  # 4 hours in ms
@@ -24,6 +25,7 @@ class TestAggregate4hTo8h:
                 "lowPrice": 100,
                 "closePrice": 110,
                 "volume": 1200,
+                "volumeDelta": -200.2 # <-- 4. ДОБАВЛЯЕМ ТЕСТОВЫЕ ДАННЫЕ
             },
         ]
 
@@ -41,6 +43,34 @@ class TestAggregate4hTo8h:
         assert candle["lowPrice"] == 90
         assert candle["closePrice"] == 110
         assert candle["volume"] == 2200
+        
+        # --- 4. НОВЫЙ ТЕСТ: 100.5 + (-200.2) = -99.7 ---
+        assert candle["volumeDelta"] == -99.7
+
+    def test_aggregate_klines_missing_delta(self):
+        """Test: aggregation handles missing volumeDelta (e.g., from Bybit)."""
+        candles_4h = [
+            {
+                "openTime": 0, "openPrice": 100, "highPrice": 110, 
+                "lowPrice": 90, "closePrice": 105, "volume": 1000,
+                # No volumeDelta
+            },
+            {
+                "openTime": 14400000, "openPrice": 105, "highPrice": 115, 
+                "lowPrice": 100, "closePrice": 110, "volume": 1200,
+                "volumeDelta": 50 # <-- Есть только у второй
+            },
+        ]
+
+        with patch("data_collector.aggregation_8h.get_interval_duration_ms") as mock_get_ms:
+            mock_get_ms.side_effect = lambda tf: 14400000 if tf == "4h" else 28800000
+            result = _aggregate_4h_to_8h(candles_4h, "klines")
+
+        assert len(result) == 1
+        candle = result[0]
+        assert candle["volume"] == 2200
+        # --- 4. НОВЫЙ ТЕСТ: 0 + 50 = 50 ---
+        assert candle["volumeDelta"] == 50
 
     def test_aggregate_oi_normal_case(self):
         """Test: OI aggregation — value taken from the SECOND 4h candle."""
@@ -103,8 +133,8 @@ async def test_generate_and_save_8h_cache_success(mock_merge, mock_format, mock_
             {
                 "symbol": "BTCUSDT",
                 "data": [
-                    {"openTime": 0, "openPrice": 100, "highPrice": 110, "lowPrice": 90, "closePrice": 105, "volume": 1000, "openInterest": 1000, "fundingRate": 0.001},
-                    {"openTime": 14400000, "openPrice": 105, "highPrice": 115, "lowPrice": 100, "closePrice": 110, "volume": 1200, "openInterest": 1500, "fundingRate": 0.002},
+                    {"openTime": 0, "openPrice": 100, "highPrice": 110, "lowPrice": 90, "closePrice": 105, "volume": 1000, "openInterest": 1000, "fundingRate": 0.001, "volumeDelta": 100},
+                    {"openTime": 14400000, "openPrice": 105, "highPrice": 115, "lowPrice": 100, "closePrice": 110, "volume": 1200, "openInterest": 1500, "fundingRate": 0.002, "volumeDelta": -200},
                 ]
             }
         ]
@@ -114,7 +144,7 @@ async def test_generate_and_save_8h_cache_success(mock_merge, mock_format, mock_
     # Mock helpers
     def mock_aggregate(candles, data_type):
         if data_type == "klines":
-            return [{"openTime": 0, "closeTime": 28799999, "openPrice": 100, "highPrice": 115, "lowPrice": 90, "closePrice": 110, "volume": 2200}]
+            return [{"openTime": 0, "closeTime": 28799999, "openPrice": 100, "highPrice": 115, "lowPrice": 90, "closePrice": 110, "volume": 2200, "volumeDelta": -100}]
         elif data_type == "oi":
             return [{"openTime": 0, "openInterest": 1500}]
         return []
@@ -150,8 +180,8 @@ async def test_generate_and_save_8h_cache_funding_rates_preserved(mock_merge, mo
             {
                 "symbol": "ETHUSDT",
                 "data": [
-                    {"openTime": 0, "fundingRate": 0.001},
-                    {"openTime": 14400000, "fundingRate": 0.002},
+                    {"openTime": 0, "fundingRate": 0.001, "volumeDelta": 10},
+                    {"openTime": 14400000, "fundingRate": 0.002, "volumeDelta": 20},
                 ]
             }
         ]
@@ -161,7 +191,7 @@ async def test_generate_and_save_8h_cache_funding_rates_preserved(mock_merge, mo
     # Mock aggregation to return valid 8h klines & OI (so coin is NOT skipped)
     def mock_aggregate(candles, data_type):
         if data_type == "klines":
-            return [{"openTime": 0, "closeTime": 28799999, "openPrice": 2000, "highPrice": 2100, "lowPrice": 1900, "closePrice": 2050, "volume": 500}]
+            return [{"openTime": 0, "closeTime": 28799999, "openPrice": 2000, "highPrice": 2100, "lowPrice": 1900, "closePrice": 2050, "volume": 500, "volumeDelta": 30}]
         elif data_type == "oi":
             return [{"openTime": 0, "openInterest": 8000}]
         return []
@@ -176,6 +206,15 @@ async def test_generate_and_save_8h_cache_funding_rates_preserved(mock_merge, mo
     processed_data_8h = mock_merge.call_args[0][0]
     assert "ETHUSDT" in processed_data_8h
     fr_list = processed_data_8h["ETHUSDT"]["fr"]
+    
+    # --- 4. ПРОВЕРЯЕМ, ЧТО Klines/OI АГРЕГИРОВАНЫ ---
+    klines_list = processed_data_8h["ETHUSDT"]["klines"]
+    oi_list = processed_data_8h["ETHUSDT"]["oi"]
+    
+    assert len(klines_list) == 1
+    assert klines_list[0]["volumeDelta"] == 30 # (Агрегировано)
+    assert len(oi_list) == 1
+    assert oi_list[0]["openInterest"] == 8000 # (Агрегировано)
 
     # Verify FR are preserved exactly as in 4h input (no aggregation)
     assert len(fr_list) == 2

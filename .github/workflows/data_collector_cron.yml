@@ -1,0 +1,86 @@
+name: Data Collector Cron
+
+on:
+  schedule:
+    # Запускать каждую минуту
+    - cron: "*/1 * * * *"
+
+  workflow_dispatch:
+
+jobs:
+  run-tasks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get UTC Time Info
+        id: time
+        run: |
+          # (Устанавливаем переменные)
+          echo "minute=$(date -u +'%M')" >> $GITHUB_OUTPUT
+          echo "hour=$(date -u +'%H')" >> $GITHUB_OUTPUT
+
+      # --- 1. Задача A: 1 час (Высший приоритет) ---
+      - name: Run 1h Task
+        if: steps.time.outputs.minute == '01'
+        run: |
+          echo "Запускаю 1h..."
+          curl -s -X POST ${{ secrets.API_BASE_URL }}/get-market-data \
+            -H "Content-Type: application/json" \
+            -d '{"timeframe": "1h"}' \
+            --fail-with-http-errors
+
+      # --- 2. Задача B: Funding Rate (FR) ---
+      # --- ИСПРАВЛЕНИЕ: Логика 'if' перенесена в 'run' ---
+      - name: Run FR Task
+        run: |
+          minute=${{ steps.time.outputs.minute }}
+          hour=${{ steps.time.outputs.hour }}
+
+          # (Используем арифметику bash)
+          if [ "$minute" -eq 5 ] && [ $((hour % 4)) -eq 0 ]; then
+            echo "Запускаю FR (час $hour, минута $minute)..."
+            curl -s -X POST ${{ secrets.API_BASE_URL }}/api/v1/internal/update-fr \
+              -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+              --fail-with-http-errors
+          else
+            echo "Пропускаю FR (час $hour, минута $minute)."
+          fi
+
+      # --- 3. Задача C: 4 часа (4h / 8h) ---
+      # --- ИСПРАВЛЕНИЕ: Логика 'if' перенесена в 'run' ---
+      - name: Run 4h/8h Task
+        run: |
+          minute=${{ steps.time.outputs.minute }}
+          hour=${{ steps.time.outputs.hour }}
+
+          if [ "$minute" -eq 8 ] && [ $((hour % 4)) -eq 0 ]; then
+            echo "Запускаю 4h (час $hour, минута $minute)..."
+            curl -s -X POST ${{ secrets.API_BASE_URL }}/get-market-data \
+              -H "Content-Type: application/json" \
+              -d '{"timeframe": "4h"}' \
+              --fail-with-http-errors
+          else
+            echo "Пропускаю 4h (час $hour, минута $minute)."
+          fi
+
+      # --- 4. Задача D: 12 часов (12h) ---
+      # (Здесь (%) не было, 'if' остается на уровне шага)
+      - name: Run 12h Task
+        if: steps.time.outputs.minute == '11' && (steps.time.outputs.hour == '00' || steps.time.outputs.hour == '12')
+        run: |
+          echo "Запускаю 12h..."
+          curl -s -X POST ${{ secrets.API_BASE_URL }}/get-market-data \
+            -H "Content-Type: application/json" \
+            -d '{"timeframe": "12h"}' \
+            --fail-with-http-errors
+
+      # --- 5. Задача E: 1 день (1d) ---
+      # (Здесь (%) не было, 'if' остается на уровне шага)
+      - name: Run 1d Task
+        if: steps.time.outputs.minute == '14' && steps.time.outputs.hour == '00'
+        run: |
+          echo "Запускаю 1d..."
+          curl -s -X POST ${{ secrets.API_BASE_URL }}/get-market-data \
+            -H "Content-Type: application/json" \
+            -d '{"timeframe": "1d"}' \
+            --fail-with-http-errors

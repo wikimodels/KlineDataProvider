@@ -7,16 +7,14 @@ import base64
 import zlib 
 import redis # Для класса ошибки ConnectionError
 
-# --- 1. ИСПРАВЛЕНИЕ: Импортируем FakeRedis ---
+# 1. Импортируем FakeRedis
 from fakeredis import FakeRedis
 
-# --- 2. ИМПОРТ КОНСТАНТ ---
+# 2. Импортируем константы
 from config import REDIS_TASK_QUEUE_KEY, WORKER_LOCK_KEY
+# (CRON_SECRET будет 'test_secret_for_tests' из conftest.py)
 
-# --- 3. ИСПРАВЛЕНИЕ: УДАЛЯЕМ ЭТОТ ИМПОРТ ---
-# from main import app 
-# (conftest.py уже импортирует app ПРАВИЛЬНО)
-# ----------------------------------------
+# (НЕ импортируем 'app' отсюда)
 
 
 @pytest.mark.asyncio
@@ -24,8 +22,6 @@ async def test_schedule_market_data_job_success(test_client: AsyncClient, mock_r
     """Тест: Успешный POST /get-market-data (202 Accepted)."""
     timeframe = "1h"
     mock_redis.delete(WORKER_LOCK_KEY)
-
-    # --- Используем импортированную константу ---
     initial_queue_len = mock_redis.llen(REDIS_TASK_QUEUE_KEY)
     
     response = await test_client.post("/get-market-data", json={"timeframe": timeframe})
@@ -33,7 +29,6 @@ async def test_schedule_market_data_job_success(test_client: AsyncClient, mock_r
     assert response.status_code == 202
     assert response.json() == {"message": f"Задача для {timeframe} принята в очередь."}
     
-    # --- Используем импортированную константу ---
     final_queue_len = mock_redis.llen(REDIS_TASK_QUEUE_KEY)
     assert final_queue_len == initial_queue_len + 1
     added_task = mock_redis.lindex(REDIS_TASK_QUEUE_KEY, -1)
@@ -50,16 +45,14 @@ async def test_schedule_market_data_job_invalid_timeframe_post(test_client: Asyn
 
 @pytest.mark.asyncio
 async def test_schedule_market_data_job_with_lock(test_client: AsyncClient, mock_redis: FakeRedis):
-    """Тест: schedule_market_data_job, когда воркер уже заблокирован."""
+    """Тест: /get-market-data (Klines) отклонен (409), если воркер занят."""
     timeframe = "1h"
-    # --- Используем импортированную константу ---
     mock_redis.set(WORKER_LOCK_KEY, "BUSY_PROCESSING")
 
     response = await test_client.post("/get-market-data", json={"timeframe": timeframe})
 
     assert response.status_code == 409
     assert "Конфликт: Сборщик уже занят" in response.json()["detail"]
-    # --- Используем импортированную константу ---
     assert mock_redis.llen(REDIS_TASK_QUEUE_KEY) == 0
 
 
@@ -70,7 +63,6 @@ async def test_get_cached_data_success(test_client: AsyncClient, mock_redis: Fak
     cache_key = f"cache:{timeframe}"
     cached_data = {"BTC/USDT": [{"time": 123, "value": 456}]}
     
-    # (Симуляция zlib + base64)
     json_str = json.dumps(cached_data)
     compressed_data = zlib.compress(json_str.encode('utf-8'))
     base64_compressed = base64.b64encode(compressed_data).decode('utf-8')
@@ -85,8 +77,8 @@ async def test_get_cached_data_success(test_client: AsyncClient, mock_redis: Fak
 
 @pytest.mark.asyncio
 async def test_get_cached_data_invalid_timeframe_get(test_client: AsyncClient):
-    """Тест: get_cached_data с неверным таймфреймом для GET."""
-    response = await test_client.get("/cache/invalid_timeframe")
+    """Тест: get_cached_data с неверным ключом."""
+    response = await test_client.get("/cache/invalid_key")
     assert response.status_code == 400
     assert "недопустим для чтения из кэша" in response.json()["detail"]
 
@@ -103,27 +95,62 @@ async def test_get_cached_data_not_found(test_client: AsyncClient, mock_redis: F
     assert response.status_code == 404
     assert "пуст" in response.json()["detail"]
 
+# ---
+# --- ИЗМЕНЕННЫЕ ТЕСТЫ ДЛЯ /update-fr ---
+# ---
 
 @pytest.mark.asyncio
-async def test_trigger_fr_update_success(test_client: AsyncClient):
-    """Тест: trigger_fr_update с верной аутентификацией."""
-    # (CRON_SECRET берется из conftest)
-    mock_task_func = AsyncMock()
-    with patch('api_routes.run_fr_update_process', mock_task_func):
-        
-        # --- ИСПРАВЛЕНИЕ: Используем тот же токен, что и в conftest.py ---
-        test_token = "test_secret_for_tests"
-        headers = {"Authorization": f"Bearer {test_token}"}
-        # --------------------------------------------------------
-        
-        response = await test_client.post(
-            "/api/v1/internal/update-fr",
-            headers=headers
-        )
+async def test_trigger_fr_update_success(test_client: AsyncClient, mock_redis: FakeRedis):
+    """
+    Тест: Успешный POST /api/v1/internal/update-fr (202 Accepted).
+    Проверяет, что задача 'fr' добавлена в очередь Redis.
+    """
+    # 1. Убедимся, что воркер свободен и очередь пуста
+    mock_redis.delete(WORKER_LOCK_KEY)
+    initial_queue_len = mock_redis.llen(REDIS_TASK_QUEUE_KEY)
+    
+    # 2. Используем токен, заданный в conftest.py
+    test_token = "test_secret_for_tests"
+    headers = {"Authorization": f"Bearer {test_token}"}
+    
+    response = await test_client.post(
+        "/api/v1/internal/update-fr",
+        headers=headers
+    )
 
-        assert response.status_code == 202
-        assert "принята в очередь" in response.json()["message"]
-        mock_task_func.assert_called_once() # Проверяем, что мок был вызван
+    # 3. Проверяем, что задача принята
+    assert response.status_code == 202
+    assert "Задача для fr принята в очередь" in response.json()["message"]
+    
+    # 4. Проверяем, что в очередь добавлена строка "fr"
+    final_queue_len = mock_redis.llen(REDIS_TASK_QUEUE_KEY)
+    assert final_queue_len == initial_queue_len + 1
+    added_task = mock_redis.lindex(REDIS_TASK_QUEUE_KEY, -1)
+    assert added_task == "fr"
+
+
+@pytest.mark.asyncio
+async def test_trigger_fr_update_conflict_lock(test_client: AsyncClient, mock_redis: FakeRedis):
+    """
+    Тест: /update-fr (FR) отклонен (409), если воркер занят.
+    (Проверяет, что ОБА эндпоинта используют один и тот же лок)
+    """
+    # 1. "Занимаем" воркер (например, задачей Klines)
+    mock_redis.set(WORKER_LOCK_KEY, "BUSY_PROCESSING_KLINES")
+    
+    # 2. Используем правильный токен
+    test_token = "test_secret_for_tests"
+    headers = {"Authorization": f"Bearer {test_token}"}
+
+    response = await test_client.post(
+        "/api/v1/internal/update-fr",
+        headers=headers
+    )
+
+    # 3. Проверяем, что воркер ответил 409
+    assert response.status_code == 409
+    assert "Конфликт: Сборщик уже занят" in response.json()["detail"]
+    assert mock_redis.llen(REDIS_TASK_QUEUE_KEY) == 0
 
 
 @pytest.mark.asyncio
@@ -143,11 +170,13 @@ async def test_trigger_fr_update_missing_auth_header(test_client: AsyncClient):
     response = await test_client.post("/api/v1/internal/update-fr")
     assert response.status_code == 403
 
+# ---
+# --- (Остальные тесты без изменений) ---
+# ---
 
 @pytest.mark.asyncio
 async def test_queue_status_success(test_client: AsyncClient, mock_redis: FakeRedis):
     """Тест: queue_status, когда Redis доступен и в очереди есть элементы."""
-    # --- Используем импортированную константу ---
     mock_redis.rpush(REDIS_TASK_QUEUE_KEY, "1h", "4h", "12h")
     
     response = await test_client.get("/queue-status")
@@ -159,7 +188,6 @@ async def test_queue_status_success(test_client: AsyncClient, mock_redis: FakeRe
 @pytest.mark.asyncio
 async def test_queue_status_empty(test_client: AsyncClient, mock_redis: FakeRedis):
     """Тест: queue_status, когда очередь пуста."""
-    # --- Используем импортированную константу ---
     mock_redis.delete(REDIS_TASK_QUEUE_KEY)
     
     response = await test_client.get("/queue-status")
@@ -179,7 +207,6 @@ async def test_health_check(test_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_schedule_market_data_job_valid_timeframes(test_client: AsyncClient, mock_redis: FakeRedis):
     """Тест: schedule_market_data_job со всеми верными POST таймфреймами."""
-    # (Этот тест взят у тебя, он хороший)
     valid_timeframes = ["1h", "4h", "12h", "1d"]
     
     for tf in valid_timeframes:
@@ -196,8 +223,7 @@ async def test_schedule_market_data_job_valid_timeframes(test_client: AsyncClien
 @pytest.mark.asyncio
 async def test_get_cached_data_valid_timeframes(test_client: AsyncClient, mock_redis: FakeRedis):
     """Тест: get_cached_data со всеми верными GET таймфреймами."""
-    # (Этот тест взят у тебя, он хороший)
-    valid_timeframes = ["1h", "4h", "8h", "12h", "1d"]
+    valid_timeframes = ["1h", "4h", "8h", "12h", "1d", "global_fr"]
     
     for tf in valid_timeframes:
         cache_key = f"cache:{tf}"
@@ -215,7 +241,6 @@ async def test_get_cached_data_valid_timeframes(test_client: AsyncClient, mock_r
         assert response.json() == cached_data
         mock_redis.delete(cache_key)
 
-# --- 3. НОВЫЙ ТЕСТ (который я предложил) ---
 @pytest.mark.asyncio
 async def test_post_get_market_data_redis_rpush_fails(test_client: AsyncClient, mock_redis: FakeRedis):
     """
@@ -223,7 +248,6 @@ async def test_post_get_market_data_redis_rpush_fails(test_client: AsyncClient, 
     """
     mock_redis.delete(WORKER_LOCK_KEY)
     
-    # "Ломаем" mock_redis: заставляем rpush выбрасывать ConnectionError
     with patch.object(mock_redis, 'rpush', side_effect=redis.exceptions.ConnectionError("Redis down!")):
         
         response = await test_client.post("/get-market-data", json={"timeframe": "1h"})

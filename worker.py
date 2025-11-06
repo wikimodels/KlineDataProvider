@@ -1,31 +1,28 @@
 import asyncio
 import logging
 import time
-import copy # <-- ЭТОТ ИМПОРТ БОЛЬШЕ НЕ НУЖЕН
 from typing import Dict, Any, List, Optional, Tuple
 from collections import defaultdict
 
 # --- Импорты ---
-# --- ИЗМЕНЕНИЕ: Заменяем database на coin_source ---
 from coin_source import get_coins_from_api
-# (Удален 'from database import get_coins_from_db')
-# ----------------------------------------------------
-
 import data_collector
-
-# --- ИЗМЕНЕНИЕ: Убираем импорт _enrich_coin_metadata ---
-# (from data_collector.data_processing import _enrich_coin_metadata)
-# --------------------------------------------------------
-
-# (Импорт aggregation_8h остается)
 from data_collector.aggregation_8h import generate_and_save_8h_cache
 from cache_manager import save_to_cache, redis_client, get_from_cache
+
+# --- ИЗМЕНЕНИЕ: Импортируем 'run_fr_update_process' ---
+try:
+    from data_collector.fr_fetcher import run_fr_update_process
+except ImportError:
+    logging.critical("WORKER: Не удалось импортировать run_fr_update_process.")
+    async def run_fr_update_process(): 
+        logging.error("WORKER: Заглушка run_fr_update_process вызвана.")
+# ----------------------------------------------------
 
 # (Импорт config)
 try:
     from config import REDIS_TASK_QUEUE_KEY, WORKER_LOCK_KEY, WORKER_LOCK_TIMEOUT_SECONDS
 except ImportError:
-    # Фоллбэки
     REDIS_TASK_QUEUE_KEY = "data_collector_task_queue"
     WORKER_LOCK_KEY = "data_collector_lock"
     WORKER_LOCK_TIMEOUT_SECONDS = 1800
@@ -37,32 +34,25 @@ logger = logging.getLogger(__name__)
 LOCK_RETRY_DELAY = 15
 ERROR_RETRY_DELAY = 10
 
-# --- (Функция _load_global_fr_cache не изменена) ---
 def _load_global_fr_cache() -> Optional[Dict[str, List[Dict]]]:
     """
-    Загружает и декодирует 'cache:global_fr' из Redis.
+    (Код не изменен)
     """
     logger.info("[WORKER] Загружаю 'cache:global_fr' из Redis...")
     try:
         fr_data = get_from_cache('global_fr')
-        
         if not fr_data:
-            logger.error("[WORKER] КРИТИЧЕСКАЯ ОШИБКА: 'cache:global_fr' не найден или пуст. "
-                         "Klines/OI будут собраны БЕЗ ФАНДИНГА.")
+            logger.error("[WORKER] КРИТИЧЕСКАЯ ОШИБКА: 'cache:global_fr' не найден или пуст.")
             return None 
-
         logger.info(f"[WORKER] 'cache:global_fr' успешно загружен. (Записей: {len(fr_data)})")
         return fr_data
-
     except Exception as e:
         logger.error(f"[WORKER] Не удалось загрузить/распарсить 'cache:global_fr': {e}", exc_info=True)
         return None
 
-# --- (Функция _process_single_timeframe_task ИСПРАВЛЕНА) ---
 async def _process_single_timeframe_task(timeframe: str, global_fr_data: Optional[Dict]):
     """
-    Обрабатывает стандартную задачу (1h, 12h, 1d).
-    Запрашивает ВСЕ монеты из API.
+    (Код не изменен)
     """
     log_prefix = f"[{timeframe.upper()}]"
     logger.info(f"{log_prefix} WORKER: Начинаю стандартную задачу...")
@@ -75,13 +65,13 @@ async def _process_single_timeframe_task(timeframe: str, global_fr_data: Optiona
          return
     logger.info(f"{log_prefix} WORKER: Получено {len(coins_from_api)} монет.")
 
-    # 2. FR (без изменений)
+    # 2. FR
     if global_fr_data is None:
          logger.warning(f"{log_prefix} WORKER: 'cache:global_fr' не загружен. Klines/OI будут собраны без FR.")
 
     # 3. Fetch Klines/OI
     market_data = await data_collector.fetch_market_data(
-        coins_from_api, # <-- Передаем монеты из API
+        coins_from_api,
         timeframe,
         prefetched_fr_data=global_fr_data 
     )
@@ -89,45 +79,35 @@ async def _process_single_timeframe_task(timeframe: str, global_fr_data: Optiona
         logger.error(f"{log_prefix} WORKER: Сборщик Klines/OI вернул некорректный ответ.")
         return
 
-    # 4. --- ОБОГАЩЕНИЕ УДАЛЕНО ---
-    # logger.info(f"{log_prefix} WORKER: Начинаю обогащение метаданных...")
-    # final_enriched_data = _enrich_coin_metadata(market_data, coins_from_api)
-    # logger.info(f"{log_prefix} WORKER: Обогащение метаданных завершено.")
-    # -----------------------------
+    # 4. (Обогащение удалено)
 
-    # 5. Save (сохраняем 'market_data' напрямую)
+    # 5. Save
     save_to_cache(timeframe, market_data)
     logger.info(f"{log_prefix} WORKER: Задача {timeframe} успешно завершена.")
 
 
-# --- (Функция _process_4h_and_8h_task ИСПРАВЛЕНА) ---
 async def _process_4h_and_8h_task(global_fr_data: Optional[Dict]):
     """
-    (ИСПРАВЛЕНО)
-    Обрабатывает специальную задачу 4h, которая также генерирует 8h.
-    Запрашивает ВСЕ монеты ОДИН РАЗ из API.
+    (Код не изменен)
     """
     log_prefix = "[4H/8H]"
     logger.info(f"{log_prefix} WORKER: Начинаю специальную задачу (4h + 8h)...")
 
-    # 1. Get coins (ОДИН РАЗ из API)
+    # 1. Get coins
     logger.info(f"{log_prefix} WORKER: Запрашиваю ВСЕ монеты из API (coin_source)...")
     coins_from_api = await get_coins_from_api()
-    
     if not coins_from_api:
         logger.warning(f"{log_prefix} WORKER: Из API не получено ни одной монеты. Задача (4h+8h) завершена.")
         return
     logger.info(f"{log_prefix} WORKER: Получено {len(coins_from_api)} монет.")
     
-    # 2. FR (без изменений)
+    # 2. FR
     if global_fr_data is None:
          logger.warning(f"{log_prefix} WORKER: 'cache:global_fr' не загружен. Klines/OI будут собраны без FR.")
 
-    # 3. Fetch Klines/OI (собираем данные 4h для всех монет)
+    # 3. Fetch Klines/OI
     master_market_data = await data_collector.fetch_market_data(
-        coins_from_api, # Используем единый список
-        '4h', 
-        prefetched_fr_data=global_fr_data 
+        coins_from_api, '4h', prefetched_fr_data=global_fr_data 
     )
     if not master_market_data or ("data" not in master_market_data):
         logger.error(f"{log_prefix} WORKER: Сборщик Klines/OI (master) вернул некорректный ответ.")
@@ -139,16 +119,11 @@ async def _process_4h_and_8h_task(global_fr_data: Optional[Dict]):
     try:
         # --- Процесс 4h ---
         logger.info("[4H] WORKER: Обрабатываю данные для '4h'...")
-        # --- ОБОГАЩЕНИЕ УДАЛЕНО ---
-        # enriched_data_4h = _enrich_coin_metadata(master_market_data, coins_from_api)
-        # save_to_cache('4h', enriched_data_4h)
-        # ---------------------------
-        save_to_cache('4h', master_market_data) # Сохраняем "как есть"
+        save_to_cache('4h', master_market_data) 
         logger.info("[4H] WORKER: Данные 4h (для всех монет) успешно сохранены в cache:4h.")
 
         # --- Процесс 8h ---
         logger.info("[8H] WORKER: Обрабатываю данные для '8h'...")
-        # (Передаем master_market_data (НЕ обогащенные) и список монет)
         await generate_and_save_8h_cache(master_market_data, coins_from_api)
         
         logger.info(f"{log_prefix} WORKER: Задача (4h + 8h) успешно завершена.")
@@ -157,31 +132,45 @@ async def _process_4h_and_8h_task(global_fr_data: Optional[Dict]):
         logger.error(f"{log_prefix} WORKER: Ошибка на этапе 'раскидывания' данных: {e_split}", exc_info=True)
 
 
-# --- (Роутер _process_task не изменен) ---
-async def _process_task(timeframe: str):
+# --- ИЗМЕНЕНИЕ: Обновляем роутер задач _process_task ---
+async def _process_task(task_name: str):
     """
     Главный роутер задач. Вызывается из background_worker.
+    Распознает 'fr' или таймфреймы.
     """
-    log_prefix = f"[{timeframe.upper()}]"
+    log_prefix = f"[{task_name.upper()}]"
     
+    if task_name == 'fr':
+        # 1. Это задача сбора Фандинга
+        logger.info(f"{log_prefix} WORKER: Получена задача обновления 'cache:global_fr'.")
+        # (Эта функция сама все делает - собирает и сохраняет в кэш)
+        await run_fr_update_process()
+        logger.info(f"{log_prefix} WORKER: Задача 'fr' успешно завершена.")
+        return
+
+    # 2. Это задача сбора Klines/OI
+    # (Загружаем FR кэш ТОЛЬКО для Klines/OI задач)
     global_fr_data = _load_global_fr_cache()
     
-    if timeframe == '4h':
+    if task_name == '4h':
         await _process_4h_and_8h_task(global_fr_data)
-    elif timeframe == '8h':
+    elif task_name == '8h':
         logger.info(f"{log_prefix} WORKER: Задача 8h получена, но будет пропущена (генерируется задачей 4h).")
         return
     else:
-        await _process_single_timeframe_task(timeframe, global_fr_data)
+        # (Обработает '1h', '12h', '1d')
+        await _process_single_timeframe_task(task_name, global_fr_data)
+# ----------------------------------------------------
             
             
 async def background_worker():
     """
     Основной цикл воркера.
-    Берет задачу из Redis (LPOP), получает блокировку, вызывает роутер _process_task.
-    (Использует константы из config)
+    Берет задачу (timeframe или 'fr') из Redis (LPOP), получает блокировку, 
+    вызывает роутер _process_task.
+    (Код этой функции не изменен)
     """
-    timeframe: str = ""
+    task_name: str = "" # (Переименовал timeframe в task_name)
     log_prefix = "[WORKER]"
     lock_acquired = False
     
@@ -195,8 +184,8 @@ async def background_worker():
                 await asyncio.sleep(LOCK_RETRY_DELAY)
                 continue
             
-            timeframe = task_data
-            log_prefix = f"[{timeframe.upper()}]"
+            task_name = task_data
+            log_prefix = f"[{task_name.upper()}]"
             lock_acquired = False
             start_time = time.time()
 
@@ -204,37 +193,35 @@ async def background_worker():
             if not redis_client:
                 logger.warning(f"{log_prefix} WORKER: Redis недоступен...")
                 await asyncio.sleep(ERROR_RETRY_DELAY)
-                redis_client.rpush(REDIS_TASK_QUEUE_KEY, timeframe)
+                redis_client.rpush(REDIS_TASK_QUEUE_KEY, task_name)
                 continue
 
             lock_acquired = redis_client.set(
                 WORKER_LOCK_KEY,
-                f"busy_by_{timeframe}_at_{int(start_time)}",
+                f"busy_by_{task_name}_at_{int(start_time)}",
                 nx=True,
-                ex=WORKER_LOCK_TIMEOUT_SECONDS # Используем константу из config
+                ex=WORKER_LOCK_TIMEOUT_SECONDS
             )
 
             if not lock_acquired:
                 logger.warning(f"{log_prefix} WORKER: Сборщик занят (lock). Возвращаю задачу в очередь...")
                 await asyncio.sleep(LOCK_RETRY_DELAY)
-                redis_client.rpush(REDIS_TASK_QUEUE_KEY, timeframe)
+                redis_client.rpush(REDIS_TASK_QUEUE_KEY, task_name)
                 continue
 
             logger.info(f"{log_prefix} WORKER: Блокировка получена. Начинаю задачу.")
 
             # --- Вызов Роутера Задач ---
-            await _process_task(timeframe)
+            await _process_task(task_name) # <-- Передаем task_name
             # -------------------------
             
             end_time = time.time()
-            logger.info(f"{log_prefix} WORKER: Весь процесс для задачи {timeframe} занял {end_time - start_time:.2f} сек.")
-
+            logger.info(f"{log_prefix} WORKER: Весь процесс для задачи {task_name} занял {end_time - start_time:.2f} сек.")
 
         except Exception as e:
             logger.error(f"{log_prefix} WORKER: КРИТИЧЕСКАЯ ОШИБКА в цикле: {e}", exc_info=True)
-            if not timeframe:
+            if not task_name:
                 await asyncio.sleep(ERROR_RETRY_DELAY)
-
 
         finally:
             # --- Освобождение блокировки ---
@@ -245,6 +232,6 @@ async def background_worker():
                  except Exception as redis_err:
                       logger.error(f"{log_prefix} WORKER: Ошибка при удалении блокировки Redis: {redis_err}")
             
-            timeframe = ""
+            task_name = ""
             log_prefix = "[WORKER]"
             lock_acquired = False

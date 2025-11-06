@@ -3,7 +3,7 @@
 и приведение их к ЕДИНОМУ внутреннему формату.
 
 Единый формат:
-Klines: [{'openTime': int, 'openPrice': float, 'highPrice': float, 'lowPrice': float, 'closePrice': float, 'volume': float, 'closeTime': int}]
+Klines: [{'openTime': int, 'openPrice': float, 'highPrice': float, 'lowPrice': float, 'closePrice': float, 'volume': float, 'closeTime': int, 'volumeDelta': float (optional)}]
 OI:     [{'openTime': int, 'openInterest': float, 'closeTime': int}]
 FR:     [{'openTime': int, 'fundingRate': float, 'closeTime': int}]
 """
@@ -13,27 +13,44 @@ from typing import List, Dict, Any, Optional
 
 # --- Используем логгер из родительского пакета ---
 try:
-    from .logging_setup import logger, oi_fr_error_logger
+    # --- ИЗМЕНЕНИЕ: Убрали oi_fr_error_logger ---
+    from .logging_setup import logger
 except ImportError:
     # Фоллбэк для standalone запуска
     import logging
     logger = logging.getLogger(__name__)
-    oi_fr_error_logger = logging.getLogger('oi_fr_errors')
 
 # --- BINANCE Parsers ---
 
 def parse_binance_klines(raw_data: List[List[Any]], timeframe: str) -> List[Dict[str, Any]]:
     """
     Парсит Klines (свечи) от Binance.
-    Формат Binance: [openTime, open, high, low, close, volume, closeTime, ...]
+    Формат Binance: [openTime, open, high, low, close, volume, closeTime, ..., takerBuyBaseAssetVolume (idx 9), ...]
     """
     parsed_klines = []
     try:
         for kline in raw_data:
-            if len(kline) < 7:
-                logger.warning(f"BINANCE_PARSER (klines): Пропущена свеча, неполные данные: {kline}")
+            # --- ИЗМЕНЕНИЕ: Убедимся, что у нас есть 10 полей (для takerBuy... at index 9) ---
+            if len(kline) < 10:
+                logger.warning(f"BINANCE_PARSER (klines): Пропущена свеча, неполные данные (меньше 10 полей): {kline}")
                 continue
             
+            # --- ИЗМЕНЕНИЕ: Считаем volumeDelta ---
+            try:
+                total_volume = float(kline[5])
+                buy_taker_volume = float(kline[9])
+                
+                # total_volume = buy_taker_volume + sell_taker_volume
+                # sell_taker_volume = total_volume - buy_taker_volume
+                # volume_delta = buy_taker_volume - sell_taker_volume
+                # volume_delta = buy_taker_volume - (total_volume - buy_taker_volume)
+                volume_delta = 2 * buy_taker_volume - total_volume
+                
+            except (ValueError, TypeError):
+                # Если данные некорректны (например, '0' или пустая строка), ставим None
+                volume_delta = None 
+            # --- Конец ИЗМЕНЕНИЯ ---
+
             parsed_klines.append({
                 "openTime": int(kline[0]),
                 "openPrice": float(kline[1]),
@@ -42,6 +59,7 @@ def parse_binance_klines(raw_data: List[List[Any]], timeframe: str) -> List[Dict
                 "closePrice": float(kline[4]),
                 "volume": float(kline[5]),
                 "closeTime": int(kline[6]),
+                "volumeDelta": volume_delta # <-- 1. ДОБАВЛЯЕМ НОВОЕ ПОЛЕ
             })
         return parsed_klines
     except (ValueError, TypeError, IndexError) as e:
@@ -51,7 +69,7 @@ def parse_binance_klines(raw_data: List[List[Any]], timeframe: str) -> List[Dict
 def parse_binance_oi(raw_data: List[Dict[str, str]], timeframe: str) -> List[Dict[str, Any]]:
     """
     Парсит Open Interest (OI) от Binance.
-    Формат Binance: [{"symbol": "BTCUSDT", "sumOpenInterest": "10.0", "timestamp": 123...}, ...]
+    (Код не изменен)
     """
     parsed_oi = []
     try:
@@ -60,26 +78,22 @@ def parse_binance_oi(raw_data: List[Dict[str, str]], timeframe: str) -> List[Dic
             parsed_oi.append({
                 "openTime": open_time,
                 "openInterest": float(item["sumOpenInterest"]),
-                # Добавляем closeTime для совместимости (хотя для OI это не так важно)
                 "closeTime": open_time + 1 
             })
         return parsed_oi
     except (ValueError, TypeError, KeyError) as e:
         logger.error(f"BINANCE_PARSER (oi): Ошибка парсинга OI: {e}. Raw data (sample): {str(raw_data)[:200]}...", exc_info=True)
-        oi_fr_error_logger.error(f"BINANCE_PARSER (oi): Ошибка парсинга OI: {e}.")
         return []
 
 def parse_binance_fr(raw_data: List[Dict[str, str]], timeframe: str) -> List[Dict[str, Any]]:
     """
     Парсит Funding Rate (FR) от Binance.
-    Формат Binance: [{"symbol": "BTCUSDT", "fundingTime": 123..., "fundingRate": "0.0001"}, ...]
+    (Код не изменен)
     """
     parsed_fr = []
     try:
         for item in raw_data:
-            # --- ВАЖНО: Приводим 'fundingTime' к 'openTime' ---
             open_time = int(item["fundingTime"])
-            # ------------------------------------------------
             parsed_fr.append({
                 "openTime": open_time,
                 "fundingRate": float(item["fundingRate"]),
@@ -88,7 +102,6 @@ def parse_binance_fr(raw_data: List[Dict[str, str]], timeframe: str) -> List[Dic
         return parsed_fr
     except (ValueError, TypeError, KeyError) as e:
         logger.error(f"BINANCE_PARSER (fr): Ошибка парсинга FR: {e}. Raw data (sample): {str(raw_data)[:200]}...", exc_info=True)
-        oi_fr_error_logger.error(f"BINANCE_PARSER (fr): Ошибка парсинга FR: {e}.")
         return []
 
 # --- BYBIT Parsers ---
@@ -96,7 +109,8 @@ def parse_binance_fr(raw_data: List[Dict[str, str]], timeframe: str) -> List[Dic
 def parse_bybit_klines(raw_data: List[List[str]], timeframe: str) -> List[Dict[str, Any]]:
     """
     Парсит Klines (свечи) от Bybit V5.
-    Формат Bybit: [openTime, open, high, low, close, volume, turnover]
+    Bybit НЕ предоставляет taker volume, поэтому volumeDelta будет None (kline.get() вернет None).
+    (Код не изменен)
     """
     parsed_klines = []
     try:
@@ -113,8 +127,8 @@ def parse_bybit_klines(raw_data: List[List[str]], timeframe: str) -> List[Dict[s
                 "lowPrice": float(kline[3]),
                 "closePrice": float(kline[4]),
                 "volume": float(kline[5]),
-                # Bybit не возвращает closeTime, рассчитываем его (хотя klines[0] уже openTime)
-                "closeTime": open_time + 1 # Не используется, но для консистентности
+                "closeTime": open_time + 1,
+                # volumeDelta здесь не будет, что нормально
             })
         # Bybit возвращает klines в обратном порядке (от новых к старым)
         return parsed_klines[::-1]
@@ -125,7 +139,7 @@ def parse_bybit_klines(raw_data: List[List[str]], timeframe: str) -> List[Dict[s
 def parse_bybit_oi(raw_data: List[Dict[str, str]], timeframe: str) -> List[Dict[str, Any]]:
     """
     Парсит Open Interest (OI) от Bybit V5.
-    Формат Bybit: [{"timestamp": "123...", "openInterest": "10.0"}, ...]
+    (Код не изменен)
     """
     parsed_oi = []
     try:
@@ -136,32 +150,26 @@ def parse_bybit_oi(raw_data: List[Dict[str, str]], timeframe: str) -> List[Dict[
                 "openInterest": float(item["openInterest"]),
                 "closeTime": open_time + 1
             })
-        # Bybit возвращает OI в обратном порядке (от новых к старым)
         return parsed_oi[::-1]
     except (ValueError, TypeError, KeyError) as e:
         logger.error(f"BYBIT_PARSER (oi): Ошибка парсинга OI: {e}. Raw data (sample): {str(raw_data)[:200]}...", exc_info=True)
-        oi_fr_error_logger.error(f"BYBIT_PARSER (oi): Ошибка парсинга OI: {e}.")
         return []
 
 def parse_bybit_fr(raw_data: List[Dict[str, str]], timeframe: str) -> List[Dict[str, Any]]:
     """
     Парсит Funding Rate (FR) от Bybit V5.
-    Формат Bybit: [{"symbol": "BTCUSDT", "fundingRateTimestamp": "123...", "fundingRate": "0.0001"}, ...]
+    (Код не изменен)
     """
     parsed_fr = []
     try:
         for item in raw_data:
-            # --- ВАЖНО: Приводим 'fundingRateTimestamp' к 'openTime' ---
             open_time = int(item["fundingRateTimestamp"])
-            # ----------------------------------------------------
             parsed_fr.append({
                 "openTime": open_time,
                 "fundingRate": float(item["fundingRate"]),
                 "closeTime": open_time + 1
             })
-        # Bybit возвращает FR в обратном порядке (от новых к старым)
         return parsed_fr[::-1]
     except (ValueError, TypeError, KeyError) as e:
         logger.error(f"BYBIT_PARSER (fr): Ошибка парсинга FR: {e}. Raw data (sample): {str(raw_data)[:200]}...", exc_info=True)
-        oi_fr_error_logger.error(f"BYBIT_PARSER (fr): Ошибка парсинга FR: {e}.")
         return []
