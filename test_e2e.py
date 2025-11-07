@@ -3,9 +3,16 @@ import asyncio
 import sys
 import logging
 import time
+import os 
+
+
+from dotenv import load_dotenv
+load_dotenv()  
+
+# --- НАСТРОЙКА ---
+BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8000") 
 
 # --- Настройки ---
-BASE_URL = "http://127.0.0.1:8000"
 POLL_INTERVAL_SEC = 10
 MAX_WAIT_MINUTES = 10 
 # -----------------
