@@ -45,11 +45,11 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(background_worker())
         logger.info("Фоновый воркер (data_collector) успешно запущен.")
 
-        # 3. Проверка CRON_SECRET
-        if not os.environ.get("CRON_SECRET"):
-             logger.warning("!!! CRON_SECRET не установлен. Эндпоинт /api/v1/internal/update-fr НЕ БУДЕТ РАБОТАТЬ. !!!")
+        # 3. Проверка SECRET_TOKEN
+        if not os.environ.get("SECRET_TOKEN"):
+             logger.warning("!!! SECRET_TOKEN не установлен. Эндпоинт /api/v1/internal/update-fr НЕ БУДЕТ РАБОТАТЬ. !!!")
         else:
-             logger.info("CRON_SECRET загружен. Эндпоинт /api/v1/internal/update-fr активен.")
+             logger.info("SECRET_TOKEN загружен. Эндпоинт /api/v1/internal/update-fr активен.")
 
     except Exception as e:
         logger.critical(f"--- КРИТИЧЕСКАЯ ОШИБКА ПРИ ЗАПУСКЕ: {e} ---", exc_info=True)

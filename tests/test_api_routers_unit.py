@@ -12,7 +12,7 @@ from fakeredis import FakeRedis
 
 # 2. Импортируем константы
 from config import REDIS_TASK_QUEUE_KEY, WORKER_LOCK_KEY
-# (CRON_SECRET будет 'test_secret_for_tests' из conftest.py)
+# (SECRET_TOKEN будет 'test_secret_for_tests' из conftest.py)
 
 # (НЕ импортируем 'app' отсюда)
 

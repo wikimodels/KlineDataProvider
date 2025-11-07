@@ -40,7 +40,7 @@ jobs:
           if [ "$minute" -eq 5 ] && [ $((hour % 4)) -eq 0 ]; then
             echo "Запускаю FR (час $hour, минута $minute)..."
             curl -s -X POST ${{ secrets.API_BASE_URL }}/api/v1/internal/update-fr \
-              -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+              -H "Authorization: Bearer ${{ secrets.SECRET_TOKEN }}" \
               --fail-with-http-errors
           else
             echo "Пропускаю FR (час $hour, минута $minute)."

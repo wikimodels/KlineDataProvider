@@ -26,7 +26,7 @@ WORKER_LOCK_TIMEOUT_SECONDS = 1800 # 30 минут
 # === Конфигурация API (Этого Сервера) ===
 # ============================================================================
 # Секрет для защиты эндпоинта /update-fr (из api_routes.py и main.py)
-CRON_SECRET = os.environ.get("CRON_SECRET")
+SECRET_TOKEN = os.environ.get("SECRET_TOKEN")
 
 # (Ранее было в api_routes.py)
 # Таймфреймы, для которых можно ЗАПУСТИТЬ сбор (POST)

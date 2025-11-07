@@ -1,7 +1,7 @@
 // Deno Deploy Cron Job Script (cron_job.ts)
 
 const API_BASE_URL = "http://127.0.0.1:8000"; // (Замени на URL твоего Render-сервера)
-const CRON_SECRET = "твой_реальный_cron_secret_из_.env";
+const SECRET_TOKEN = "твой_реальный_cron_secret_из_.env";
 
 // -------------------------------------------------------------------
 // Хелпер для отправки запроса и логирования
@@ -73,7 +73,7 @@ async function runCronJobs() {
   if (minute === 5 && hour % 4 === 0) {
     // 00:05, 04:05, 08:05...
     console.log("Запускаю: fr");
-    await postApi("/api/v1/internal/update-fr", null, CRON_SECRET);
+    await postApi("/api/v1/internal/update-fr", null, SECRET_TOKEN);
   }
 
   // 3. 4h / 8h

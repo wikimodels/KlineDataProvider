@@ -17,14 +17,14 @@ try:
         POST_TIMEFRAMES,
         ALLOWED_CACHE_KEYS, 
         REDIS_TASK_QUEUE_KEY,
-        CRON_SECRET
+        SECRET_TOKEN
     )
 except ImportError:
     # Фоллбэки
     POST_TIMEFRAMES = ['1h', '4h', '12h', '1d']
     ALLOWED_CACHE_KEYS = ['1h', '4h', '8h', '12h', '1d', 'global_fr']
     REDIS_TASK_QUEUE_KEY = "data_collector_task_queue"
-    CRON_SECRET = os.environ.get("CRON_SECRET")
+    SECRET_TOKEN = os.environ.get("SECRET_TOKEN")
 
 # --- ИЗМЕНЕНИЕ: Нам больше не нужно импортировать run_fr_update_process здесь ---
 # (Он будет вызываться только из worker.py)
@@ -42,14 +42,14 @@ security = HTTPBearer()
 
 def verify_cron_secret(credentials: HTTPBearer = Security(security)):
     """Проверяет секретный токен для Cron-Job."""
-    if not CRON_SECRET:
-        logging.error("[CRON_JOB_API] Запрос отклонен: CRON_SECRET не установлен на сервере (503).")
+    if not SECRET_TOKEN:
+        logging.error("[CRON_JOB_API] Запрос отклонен: SECRET_TOKEN не установлен на сервере (503).")
         raise HTTPException(
             status_code=503,
             detail="Сервис недоступен: Секрет для Cron-Job не настроен."
         )
     
-    if credentials.credentials != CRON_SECRET:
+    if credentials.credentials != SECRET_TOKEN:
         logging.warning(f"[CRON_JOB_API] Запрос отклонен: Неверный токен (403).")
         raise HTTPException(
             status_code=403,
