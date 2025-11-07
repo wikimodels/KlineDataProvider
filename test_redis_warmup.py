@@ -9,9 +9,16 @@ from dotenv import load_dotenv
 # --- 1. Загрузка конфигурации из .env ---
 load_dotenv()  
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8000") 
-# --- ИСПРАВЛЕНИЕ: Читаем SECRET_TOKEN ---
 SECRET_TOKEN = os.environ.get("SECRET_TOKEN") 
-# ----------------------------------------
+
+# --- (ИЗМЕНЕНИЕ) Импортируем redis_client ---
+try:
+    from cache_manager import redis_client
+except ImportError:
+    log.error("Не удалось импортировать redis_client из cache_manager. Очистка очереди невозможна.")
+    redis_client = None
+# --- Конец Изменения ---
+
 
 # --- Настройки ---
 POLL_INTERVAL_SEC = 10
@@ -78,6 +85,23 @@ async def wait_for_worker_to_be_free(client: httpx.AsyncClient, task_name: str):
             if response.status_code == 202:
                 # (Логика очистки тестовой задачи '1h')
                 log.info(f"✅ Воркер освободился (получен 202). Задача '{task_name}' выполнена.")
+                
+                # --- (ИЗМЕНЕНИЕ) Раскомментирована очистка очереди ---
+                try:
+                    if redis_client:
+                        # (Импортируем ключ очереди)
+                        from config import REDIS_TASK_QUEUE_KEY
+                        q_len = 1
+                        while q_len > 0:
+                            log.info("... Очищаю '1h' (тестовую) задачу из очереди...")
+                            redis_client.lpop(REDIS_TASK_QUEUE_KEY)
+                            await asyncio.sleep(1) 
+                            q_len = redis_client.llen(REDIS_TASK_QUEUE_KEY)
+                    else:
+                        log.warning("... redis_client не импортирован, пропускаю очистку '1h' задачи.")
+                except Exception as e: 
+                     log.warning(f"Не удалось очистить тестовую '1h' задачу: {e}")
+                # --- Конец Изменения ---
                 return
             
             elif response.status_code == 409:
@@ -97,7 +121,6 @@ async def post_task(client: httpx.AsyncClient, task_name: str):
     """
     if task_name == "fr":
         # Это задача FR
-        # --- ИСПРАВЛЕНИЕ: Теперь SECRET_TOKEN прочитан ---
         if not SECRET_TOKEN: 
             log.error("💥 [FAIL] SECRET_TOKEN не найден в .env. Не могу запустить задачу 'fr'.")
             raise ValueError("SECRET_TOKEN not set")
@@ -167,7 +190,7 @@ def validate_cache_data(data: dict, key: str):
         assert candle_key in candle, f"Отсутствует обязательный ключ Klines '{candle_key}' в свече"
         
     assert "openInterest" in candle, "Отсутствует ключ 'openInterest' (может быть None)"
-    assert "fundingRate" in candle, "Отсут Vствует ключ 'fundingRate' (может быть None)"
+    assert "fundingRate" in candle, "Отсутствует ключ 'fundingRate' (может быть None)"
 
     log.info(f"✅ [OK] Валидация для 'cache:{key}' прошла успешно.")
 
