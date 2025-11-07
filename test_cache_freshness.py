@@ -11,12 +11,11 @@ load_dotenv()
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8000") 
 
 # --- 2. Настройки теста ---
-# Ключи для проверки (исключаем 'global_fr', т.к. у него другая логика свежести)
 CACHE_KEYS_TO_TEST = ["1h", "4h", "8h", "12h", "1d"]
 
-# Множитель "допустимого протухания".
-# (Например, 3 * '1h' = 3 часа. Если данные старше, тест упадет)
-STALENESS_MULTIPLIER = 3
+# Добавляем 15 минут (в мс) к интервалу, чтобы дать время
+# cron-задаче и серверу на запуск и выполнение.
+GRACE_PERIOD_MS = 15 * 60 * 1000 
 # -----------------
 
 # --- 3. Настройка логгера ---
@@ -54,9 +53,10 @@ async def run_freshness_test():
     log.info(f"Цель: {BASE_URL}")
     
     all_fresh = True
-    current_utc_time_ms = int(time.time() * 1000)
+    # --- (ИЗМЕНЕНИЕ) 'current_utc_time_ms' ПЕРЕМЕЩЕНО В ЦИКЛ ---
 
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0) as client:
+    # Таймаут увеличен до 120 секунд (для загрузки больших кэшей 8h)
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=120.0) as client:
         
         # --- Шаг 1: Проверка, что сервер жив ---
         try:
@@ -82,37 +82,48 @@ async def run_freshness_test():
                 response.raise_for_status()
                 data = response.json()
 
-                # 1. Получаем 'closeTime' (max_close_time из data_processing.py)
+                # 1. Получаем 'closeTime'
                 last_close_time_ms = data.get("closeTime")
                 if not last_close_time_ms:
                     log.error(f"💥 [FAIL] 'cache:{key}' не содержит 'closeTime' в корне.")
                     all_fresh = False
                     continue
 
-                # 2. Рассчитываем допустимое "протухание"
+                # 2. Рассчитываем интервалы
                 interval_ms = get_interval_duration_ms(key)
                 if interval_ms == 0:
                     log.error(f"💥 [FAIL] Неизвестный интервал для ключа '{key}'.")
                     all_fresh = False
                     continue
                 
-                allowed_staleness_ms = interval_ms * STALENESS_MULTIPLIER
+                allowed_staleness_ms = interval_ms + GRACE_PERIOD_MS
                 
-                # 3. Сравниваем
+                # --- (ИЗМЕНЕНИЕ) Время 'сейчас' фиксируется ПЕРЕД СРАВНЕНИЕМ ---
+                current_utc_time_ms = int(time.time() * 1000)
                 time_diff_ms = current_utc_time_ms - last_close_time_ms
+                # ----------------------------------------------------------
                 
+                # 3. Сравниваем (Логика с 4 состояниями)
                 if time_diff_ms < 0:
                      log.error(f"💥 [FAIL] 'cache:{key}' из будущего? (Разница: {time_diff_ms} мс). Проверьте системное время.")
                      all_fresh = False
                 
-                elif time_diff_ms > allowed_staleness_ms:
-                    log.error(f"💥 [FAIL] 'cache:{key}' ПРОТУХ!")
-                    log.error(f"       Последние данные: {time_diff_ms / 1000 / 3600:.1f} часов назад.")
-                    log.error(f"       Допустимо:       {allowed_staleness_ms / 1000 / 3600:.1f} часов назад.")
-                    all_fresh = False
+                elif time_diff_ms <= interval_ms:
+                    # 1. ИДЕАЛЬНО СВЕЖИЕ
+                    log.info(f"       ✅ [OK] 'cache:{key}' актуален (Данные: {time_diff_ms / 1000 / 3600:.1f} ч. назад).")
+
+                elif time_diff_ms <= allowed_staleness_ms:
+                    # 2. GRACE PERIOD (Все еще ОК, но с предупреждением)
+                    staleness_minutes = (time_diff_ms - interval_ms) / 1000 / 60
+                    log.warning(f"       ⚠️  [ПРЕДУПРЕЖДЕНИЕ] 'cache:{key}' находится в 'grace period' ({GRACE_PERIOD_MS / 1000 / 60:.0f} мин).")
+                    log.warning(f"       Данные старше интервала на: {staleness_minutes:.1f} мин.")
                 
                 else:
-                    log.info(f"       ✅ [OK] 'cache:{key}' актуален (Данные: {time_diff_ms / 1000 / 3600:.1f} ч. назад).")
+                    # 3. ПРОТУХШИЕ
+                    log.error(f"💥 [FAIL] 'cache:{key}' ПРОТУХ!")
+                    log.error(f"       Последние данные: {time_diff_ms / 1000 / 3600:.1f} часов назад.")
+                    log.error(f"       Допустимо (интервал + буфер 15 мин): {allowed_staleness_ms / 1000 / 3600:.1f} часов назад.")
+                    all_fresh = False
 
             except Exception as e:
                 log.error(f"💥 [FAIL] Ошибка при проверке 'cache:{key}': {e}", exc_info=True)

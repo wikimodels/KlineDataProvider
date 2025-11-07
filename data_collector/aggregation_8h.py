@@ -29,6 +29,9 @@ def _aggregate_4h_to_8h(candles_4h: List[Dict], data_type: str) -> List[Dict]:
     (Перенесено из data_processing.py)
     Агрегирует список 4-часовых свечей (Klines или OI) в 8-часовые,
     СТРОГО ПРИДЕРЖИВАЯСЬ 8-часовой UTC сетки (00:00, 08:00, 16:00).
+    
+    (ИЗМЕНЕНО: Логика стала устойчивой к пропускам свечей в 4h)
+    (ИЗМЕНЕНО: Исправлен KeyError 'closeTime')
     """
     if not candles_4h or len(candles_4h) < 2:
         return []
@@ -41,43 +44,43 @@ def _aggregate_4h_to_8h(candles_4h: List[Dict], data_type: str) -> List[Dict]:
         logger.error(f"AGGREGATE_8h [{data_type}]: Не удалось получить длительность интервалов (4h/8h). Агрегация невозможна.")
         return []
 
-    i = 0
-    while i < len(candles_4h) - 1:
-        candle1 = candles_4h[i]
+    candles_map = {candle['openTime']: candle for candle in candles_4h if 'openTime' in candle}
+    sorted_open_times = sorted(candles_map.keys())
 
-        if 'openTime' not in candle1:
-            i += 1
+    processed_c1_times = set()
+
+    for c1_open_time in sorted_open_times:
+        
+        if c1_open_time in processed_c1_times:
             continue
+            
+        candle1 = candles_map[c1_open_time]
 
-        # --- ПРОВЕРКА UTC СЕТКИ ---
         is_on_8h_grid = (candle1['openTime'] % eight_hours_ms == 0)
 
         if not is_on_8h_grid:
-            i += 1 
-            continue
-        # --------------------------
-
-        candle2 = candles_4h[i+1]
-        if 'openTime' not in candle2:
-            i += 1 
             continue
 
-        if abs(candle2['openTime'] - candle1['openTime'] - four_hours_ms) > 60 * 1000:
-            logger.warning(f"AGGREGATE_8h [{data_type}]: Пропуск свечи {candle1['openTime']}. Найдена свеча на UTC сетке, но отсутствует смежная 4h свеча.")
-            i += 1
+        expected_c2_open_time = candle1['openTime'] + four_hours_ms
+        candle2 = candles_map.get(expected_c2_open_time)
+        
+        if candle2 is None:
+            logger.debug(f"AGGREGATE_8h [{data_type}]: Пропуск свечи {candle1['openTime']}. Найдена свеча на UTC сетке, но отсутствует смежная 4h свеча (ожидалось: {expected_c2_open_time}).")
             continue
 
         # --- Свечи 1 и 2 валидны и образуют 8h свечу ---
         open_time_8h = candle1['openTime']
-        close_time_8h = open_time_8h + eight_hours_ms - 1
+        
+        # (Помечаем обе свечи как обработанные)
+        processed_c1_times.add(c1_open_time)
+        processed_c1_times.add(expected_c2_open_time)
 
+        # --- (ИЗМЕНЕНИЕ) 'closeTime' удален отсюда ---
         agg_candle = {
-            "openTime": open_time_8h,
-            "closeTime": close_time_8h
+            "openTime": open_time_8h
         }
 
         if data_type == 'klines':
-            # (Логика Klines)
             c1_h = candle1.get('highPrice')
             c2_h = candle2.get('highPrice')
             c1_l = candle1.get('lowPrice')
@@ -85,16 +88,13 @@ def _aggregate_4h_to_8h(candles_4h: List[Dict], data_type: str) -> List[Dict]:
             c1_v = candle1.get('volume', 0)
             c2_v = candle2.get('volume', 0)
 
-            # --- 3. ИЗМЕНЕНИЕ: Добавляем volumeDelta ---
-            # (Используем 0, если поле отсутствует (None) или его нет, напр. у Bybit)
             c1_vd = candle1.get('volumeDelta') or 0
             c2_vd = candle2.get('volumeDelta') or 0
-            # ----------------------------------------
 
-            # Проверяем, что все нужные значения есть
-            if None in (candle1.get('openPrice'), candle2.get('closePrice'), c1_h, c2_h, c1_l, c2_l):
-                logger.debug(f"AGGREGATE_8h [Klines]: Пропуск свечи {open_time_8h} из-за None в OHLCV.")
-                i += 2
+            # --- (ИЗМЕНЕНИЕ) Добавлена проверка .get('closeTime') ---
+            if None in (candle1.get('openPrice'), candle2.get('closePrice'), 
+                        c1_h, c2_h, c1_l, c2_l, candle2.get('closeTime')):
+                logger.debug(f"AGGREGATE_8h [Klines]: Пропуск свечи {open_time_8h} из-за None в OHLCV или closeTime.")
                 continue
 
             agg_candle.update({
@@ -102,37 +102,33 @@ def _aggregate_4h_to_8h(candles_4h: List[Dict], data_type: str) -> List[Dict]:
                 "highPrice": max(c1_h, c2_h),
                 "lowPrice": min(c1_l, c2_l),
                 "closePrice": candle2['closePrice'],
-                "volume": round(c1_v + c2_v, 2), # Суммируем объемы
-                "volumeDelta": round(c1_vd + c2_vd, 2) # <-- 3. СУММИРУЕМ ДЕЛЬТЫ
+                "volume": round(c1_v + c2_v, 2), 
+                "volumeDelta": round(c1_vd + c2_vd, 2),
+                "closeTime": candle2['closeTime'] # (Теперь безопасно)
             })
 
         elif data_type == 'oi':
-            # (Логика OI не изменилась)
             oi_value = candle2.get('openInterest')
-            if oi_value is not None:
+            close_time = candle2.get('closeTime')
+            
+            # --- (ИЗМЕНЕНИЕ) Добавлена проверка 'close_time' ---
+            if oi_value is not None and close_time is not None:
                 agg_candle["openInterest"] = oi_value
+                agg_candle["closeTime"] = close_time
             else:
-                pass 
-                i += 2 
+                logger.debug(f"AGGREGATE_8h [OI]: Пропуск свечи {open_time_8h} из-за None в OI или closeTime.")
                 continue
 
-        else: # Неизвестный тип данных
-            i += 2
+        else: 
             continue
 
         candles_8h.append(agg_candle)
-        i += 2 # Мы успешно обработали 2 свечи
-        # --- Конец цикла while ---
 
     return candles_8h
 
 
 async def generate_and_save_8h_cache(data_4h: Dict, coins_from_api: List[Dict]):
     """
-    (ИСПРАВЛЕНО)
-    Берет ГОТОВЫЕ (не обогащенные) данные 4h,
-    агрегирует их в 8h, форматирует
-    и сохраняет в кэш '8h'.
     (Код этой функции не изменен)
     """
     logger.info("[8H_GEN] Начинаю генерацию данных 8h из данных 4h...")
@@ -155,12 +151,10 @@ async def generate_and_save_8h_cache(data_4h: Dict, coins_from_api: List[Dict]):
             continue
         symbols_with_data += 1
 
-        # 1. Извлекаем FR из 4h (они не агрегируются)
         frs_4h = [{ "openTime": c['openTime'],
                     "fundingRate": c.get('fundingRate')}
                    for c in candles_4h if 'fundingRate' in c and c.get('fundingRate') is not None]
 
-        # 2. Агрегируем Klines и OI из 4h в 8h
         klines_8h = _aggregate_4h_to_8h(candles_4h, 'klines')
         ois_8h = _aggregate_4h_to_8h(candles_4h, 'oi')
 
@@ -178,7 +172,6 @@ async def generate_and_save_8h_cache(data_4h: Dict, coins_from_api: List[Dict]):
         logger.error("[8H_GEN] Нет данных для обработки после агрегации. Кэш 8h не будет создан.")
         return
 
-    # 3. Слияние (Klines/OI 8h + FR 4h)
     logger.info(f"[8H_GEN] Начинаю слияние данных 8h...")
     merged_8h_data = merge_data(processed_data_8h)
     logger.info(f"[8H_GEN] Слияние данных 8h завершено для {len(merged_8h_data)} монет.")
@@ -187,15 +180,10 @@ async def generate_and_save_8h_cache(data_4h: Dict, coins_from_api: List[Dict]):
         logger.error("[8H_GEN] Нет данных после слияния 8h. Кэш 8h не будет создан.")
         return
 
-    # 4. Финальное форматирование (включая обрезку до 399 свечей)
     logger.info("[8H_GEN] Начинаю форматирование структуры 8h...")
-    # (Используем coins_from_api для аудита и добавления 'exchanges')
     formatted_8h_data = format_final_structure(merged_8h_data, coins_from_api, '8h')
     logger.info(f"[8H_GEN] Форматирование структуры 8h завершено ({len(formatted_8h_data.get('data',[]))} монет).")
 
-    # 5. (Обогащение удалено)
-
-    # 6. Сохранение в кэш '8h'
     save_to_cache('8h', formatted_8h_data)
 
     end_time = time.time()
