@@ -179,6 +179,7 @@ async def get_queue_status():
 
 
 @router.get("/health")
+@router.head("/health")
 async def health_check():
     """Простой эндпоинт для проверки, что сервер жив."""
     return {"status": "ok"}
