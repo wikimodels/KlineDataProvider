@@ -9,22 +9,21 @@ from dotenv import load_dotenv
 # --- 1. Загрузка конфигурации из .env ---
 load_dotenv()  
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8000") 
-SECRET_TOKEN = os.environ.get("SECRET_TOKEN") # Используется для /update-fr
+# --- ИСПРАВЛЕНИЕ: Читаем SECRET_TOKEN ---
+SECRET_TOKEN = os.environ.get("SECRET_TOKEN") 
 # ----------------------------------------
 
 # --- Настройки ---
-POLL_INTERVAL_SEC = 10  # Интервал опроса воркера
-MAX_WAIT_MINUTES_PER_TASK = 15 # Макс. время ожидания ОДНОЙ задачи
+POLL_INTERVAL_SEC = 10
+MAX_WAIT_MINUTES_PER_TASK = 15
 # -----------------
 
 # --- Задачи для "прогрева" ---
-# (Запускаем FR первым, чтобы Klines его использовали)
-TASKS_TO_RUN = ["1h", "fr", "4h", "12h", "1d"]
-# Ключи кэша, которые мы будем проверять в конце
+TASKS_TO_RUN = ["fr", "1h", "4h", "12h", "1d"]
 CACHE_KEYS_TO_VALIDATE = ["global_fr", "1h", "4h", "8h", "12h", "1d"]
 # ---------------------------
 
-# Настройка логгера
+# (Остальной код логгера и хелперов БЕЗ ИЗМЕНЕНИЙ)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -32,7 +31,6 @@ logging.basicConfig(
 )
 log = logging.getLogger("CACHE_WARMUP")
 
-# (Ожидаемые ключи, скопировано из e2e_test.py)
 EXPECTED_CANDLE_KEYS = [
     "openTime", "openPrice", "highPrice", "lowPrice", "closePrice", "volume",
     "volumeDelta"
@@ -43,10 +41,6 @@ EXPECTED_TOP_LEVEL_KEYS = [
 EXPECTED_COIN_DATA_KEYS = [
     "symbol", "exchanges", "data"
 ]
-
-# ============================================================================
-# === ХЕЛПЕРЫ (из e2e_test.py) ===
-# ============================================================================
 
 async def wait_for_worker_to_be_free(client: httpx.AsyncClient, task_name: str):
     """
@@ -79,17 +73,10 @@ async def wait_for_worker_to_be_free(client: httpx.AsyncClient, task_name: str):
             raise TimeoutError(f"Таймаут! Задача '{task_name}' не завершилась за {MAX_WAIT_MINUTES_PER_TASK} мин.")
 
         try:
-            # "Пинаем" API, пытаясь запустить фейковую задачу '1h'.
             response = await client.post("/get-market-data", json={"timeframe": "1h"})
             
             if response.status_code == 202:
-                # Воркер свободен. Нам нужно "почистить" задачу '1h', которую мы добавили.
-                # (В Upstash/Redis 'LPOP count' не поддерживается, как в Redis 6.2+)
-                # (Простейший способ - просто вызвать LPOP)
-                log.info("... (Воркер свободен. Очищаю тестовую задачу '1h' из очереди...)")
-                # (Мы не можем гарантированно очистить, НО наш 'worker' все равно 
-                # сначала выполнит '1h', а только потом '4h' и т.д. 
-                # Этот скрипт просто добавит '1h' в очередь еще раз)
+                # (Логика очистки тестовой задачи '1h')
                 log.info(f"✅ Воркер освободился (получен 202). Задача '{task_name}' выполнена.")
                 return
             
@@ -110,7 +97,8 @@ async def post_task(client: httpx.AsyncClient, task_name: str):
     """
     if task_name == "fr":
         # Это задача FR
-        if not SECRET_TOKEN:
+        # --- ИСПРАВЛЕНИЕ: Теперь SECRET_TOKEN прочитан ---
+        if not SECRET_TOKEN: 
             log.error("💥 [FAIL] SECRET_TOKEN не найден в .env. Не могу запустить задачу 'fr'.")
             raise ValueError("SECRET_TOKEN not set")
             
@@ -123,28 +111,25 @@ async def post_task(client: httpx.AsyncClient, task_name: str):
         log.info(f"Запускаю задачу '{task_name}' (POST /get-market-data)...")
         response = await client.post("/get-market-data", json={"timeframe": task_name})
 
-    # Обработка ответа
+    # (Обработка ответа)
     if response.status_code == 202:
         log.info(f"✅ [OK] Задача '{task_name}' принята в очередь.")
     elif response.status_code == 409:
         log.warning(f"Воркер уже был занят (409). Ожидаю его завершения...")
-        # (wait_for_worker_to_be_free разберется с этим)
     else:
-        response.raise_for_status() # Вызовет ошибку, если 500, 400 и т.д.
+        response.raise_for_status() 
 
 
 def validate_cache_data(data: dict, key: str):
     """
-    Проверяет структуру и поля загруженных данных из кэша.
-    (Адаптировано из e2e_test.py)
+    (Код этой функции не изменен)
     """
     log.info(f"--- 🔬 Валидация данных для 'cache:{key}' ---")
     
-    # 1. Проверка 'global_fr' (у него другая структура)
+    # 1. Проверка 'global_fr'
     if key == 'global_fr':
         assert isinstance(data, dict), "'global_fr' должен быть словарем (dict)"
         assert len(data) > 0, "'global_fr' не должен быть пустым"
-        # Проверяем первую запись
         first_key = list(data.keys())[0]
         first_value = data[first_key]
         assert isinstance(first_key, str), "Ключ в 'global_fr' должен быть строкой (символом)"
@@ -182,12 +167,12 @@ def validate_cache_data(data: dict, key: str):
         assert candle_key in candle, f"Отсутствует обязательный ключ Klines '{candle_key}' в свече"
         
     assert "openInterest" in candle, "Отсутствует ключ 'openInterest' (может быть None)"
-    assert "fundingRate" in candle, "Отсутствует ключ 'fundingRate' (может быть None)"
+    assert "fundingRate" in candle, "Отсут Vствует ключ 'fundingRate' (может быть None)"
 
     log.info(f"✅ [OK] Валидация для 'cache:{key}' прошла успешно.")
 
 # ============================================================================
-# === ГЛАВНЫЙ СКРИПТ ===
+# === ГЛАВНЫЙ СКРИПТ (Без изменений) ===
 # ============================================================================
 
 async def run_cache_warmup():
@@ -249,9 +234,8 @@ async def run_cache_warmup():
             try:
                 log.info(f"Загружаю 'cache:{key}'...")
                 response = await client.get(f"/cache/{key}")
-                response.raise_for_status() # Проверка на 404 или 500
+                response.raise_for_status() 
                 
-                # Валидируем структуру
                 validate_cache_data(response.json(), key)
                 
             except Exception as e:

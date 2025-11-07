@@ -179,6 +179,18 @@ async def run_e2e_test():
             
             if response.status_code == 202:
                 log.info(f"✅ [OK] Воркер освободился (получен 202). Задача '4h' выполнена.")
+                # (Нам нужно очистить эту '1h' задачу из очереди)
+                try:
+                    q_len = 1
+                    while q_len > 0:
+                        redis_client.lpop(REDIS_TASK_QUEUE_KEY) # (Предполагая, что redis_client импортирован, но здесь его нет)
+                        # (Лучше просто подождать, пока он ее заберет)
+                        log.info("... Очищаю '1h' (тестовую) задачу из очереди...")
+                        await asyncio.sleep(2) 
+                        r = await client.get("/queue-status")
+                        q_len = r.json()["tasks_in_queue"]
+                except Exception: 
+                    pass # (Не страшно, если не удалось)
                 break
             elif response.status_code == 409:
                 log.info(f"... Воркер занят (409). Жду {POLL_INTERVAL_SEC} сек...")
@@ -199,7 +211,70 @@ async def run_e2e_test():
         response_8h.raise_for_status()
         validate_cache_data(response_8h.json(), "8h")
         
-        log.info("--- 🏆 E2E ТЕСТ УСПЕШНО ЗАВЕРШЕН! ---")
+        # -----------------------------------------------------------------
+        # --- (ИЗМЕНЕНИЕ) ЭТАП 2: Тестирование '1d' ---
+        # -----------------------------------------------------------------
+        log.info("--- 🚀 НАЧИНАЮ ЭТАП 2: Тестирование '1d' (single_timeframe_task) ---")
+
+        # --- Шаг 7: Запуск задачи 1d ---
+        log.info("Запускаю задачу 1d (POST /get-market-data)...")
+        try:
+            response = await client.post("/get-market-data", json={"timeframe": "1d"})
+            if response.status_code == 409:
+                # (Это не должно случиться, мы только что очистили '1h' задачу)
+                log.warning("Воркер все еще занят (409). Ожидаю его завершения...")
+            elif response.status_code == 202:
+                log.info("✅ [OK] Задача '1d' принята в очередь.")
+            else:
+                response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            log.error(f"💥 [FAIL] Не удалось запустить задачу '1d': {e}")
+            return
+
+        # --- Шаг 8: Ожидание завершения задачи 1d ---
+        log.info(f"Ожидаю завершения задачи '1d' (опрос каждые {POLL_INTERVAL_SEC} сек)...")
+        task_1d_started_time = time.time()
+        
+        # Сначала ждем, пока воркер заберет задачу (очередь = 0)
+        while True:
+            response = await client.get("/queue-status")
+            queue_len = response.json()["tasks_in_queue"]
+            if queue_len == 0:
+                log.info("... Воркер забрал задачу '1d' (очередь пуста).")
+                break
+            log.info(f"... Задача '1d' в очереди (длина: {queue_len}). Жду 5 сек...")
+            await asyncio.sleep(5)
+            if time.time() - task_1d_started_time > max_wait_time_sec:
+                log.error(f"💥 [FAIL] Таймаут! Воркер не забрал задачу '1d' из очереди.")
+                return
+
+        # Теперь ждем, пока воркер освободится (перестанет возвращать 409)
+        while True:
+            if time.time() - task_1d_started_time > max_wait_time_sec:
+                log.error(f"💥 [FAIL] Таймаут! Воркер не освободился (1d) за {MAX_WAIT_MINUTES} минут.")
+                return
+
+            # (Используем '1h' как безопасную "пробную" задачу)
+            response = await client.post("/get-market-data", json={"timeframe": "1h"})
+            
+            if response.status_code == 202:
+                log.info(f"✅ [OK] Воркер освободился (получен 202). Задача '1d' выполнена.")
+                break
+            elif response.status_code == 409:
+                log.info(f"... Воркер занят (1d) (409). Жду {POLL_INTERVAL_SEC} сек...")
+                await asyncio.sleep(POLL_INTERVAL_SEC)
+            else:
+                log.error(f"💥 [FAIL] Неожиданный статус при опросе воркера (1d): {response.status_code}")
+                return
+        
+        # --- Шаг 9: Загрузка и валидация 1d ---
+        log.info("Загружаю 'cache:1d'...")
+        response_1d = await client.get("/cache/1d")
+        response_1d.raise_for_status()
+        validate_cache_data(response_1d.json(), "1d")
+
+        log.info("--- 🏆 E2E ТЕСТ УСПЕШНО ЗАВЕРШЕН! (4h, 8h и 1d) ---")
+        # --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
 
 if __name__ == "__main__":

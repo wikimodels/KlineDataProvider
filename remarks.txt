@@ -1,1 +1,5 @@
-gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:$PORT --timeout 300
+gunicorn -w 1 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:$PORT --timeout 300
+
+
+Запуск интеграционного теста
+$env:RUN_SLOW_TESTS="1"; poetry run pytest -m slow -v -s tests/test_coin_source_integration.py
