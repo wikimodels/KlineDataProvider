@@ -22,8 +22,8 @@ oi_fr_error_logger = logging.getLogger('oi_fr_errors')
 # ---------------------------------
 
 
-# --- Этот код УЖЕ корректно принимает prefetched_fr_data ---
-async def fetch_market_data(coins: List[Dict], timeframe: str, prefetched_fr_data: Optional[Dict[str, List[Dict]]] = None) -> Dict[str, Any]:
+# --- ИЗМЕНЕНИЕ: Добавлен аргумент skip_formatting ---
+async def fetch_market_data(coins: List[Dict], timeframe: str, prefetched_fr_data: Optional[Dict[str, List[Dict]]] = None, skip_formatting: bool = False) -> Dict[str, Any]:
 # -----------------------------------------------------------
     """
     Основная функция-оркестратор.
@@ -59,12 +59,28 @@ async def fetch_market_data(coins: List[Dict], timeframe: str, prefetched_fr_dat
              # ----------------------------------------------------
              # Переходим сразу к объединению (которое ничего не сделает без Klines) и форматированию
              merged_data = data_processing.merge_data(processed_data) # Вернет {}
+             
+             # --- ИЗМЕНЕНИЕ: Пропускаем форматирование, если skip_formatting=True ---
+             if skip_formatting:
+                 logger.info(f"{log_prefix} Пропускаю финальное форматирование (skip_formatting=True). Возвращаю 'merged_data'.")
+                 end_total_time = time.time()
+                 logger.info(f"{log_prefix} --- Цикл сбора данных (raw) завершен за {end_total_time - start_total_time:.2f} сек. ---")
+                 return merged_data
+             # ------------------------------------------------------------------
+             
              final_structured_data = data_processing.format_final_structure(merged_data, coins, timeframe)
              end_total_time = time.time()
              logger.info(f"{log_prefix} --- Цикл сбора данных завершен (только FR) за {end_total_time - start_total_time:.2f} сек. ---")
              return final_structured_data
         else:
             logger.warning(f"{log_prefix} Нет задач Klines/OI и нет предзагруженных FR.")
+            
+            # --- ИЗМЕНЕНИЕ: Пропускаем форматирование, если skip_formatting=True ---
+            if skip_formatting:
+                logger.info(f"{log_prefix} Пропускаю финальное форматирование (skip_formatting=True). Возвращаю {{}}.")
+                return {} # Возвращаем пустой dict
+            # ------------------------------------------------------------------
+                
             return data_processing.format_final_structure({}, coins, timeframe) # Возвращаем пустую структуру
 
 
@@ -189,6 +205,15 @@ async def fetch_market_data(coins: List[Dict], timeframe: str, prefetched_fr_dat
     end_merge_time = time.time()
     logger.info(f"{log_prefix} Объединение данных завершено за {end_merge_time - start_merge_time:.2f} сек.")
 
+    
+    # --- ИЗМЕНЕНИЕ: Пропускаем форматирование, если skip_formatting=True ---
+    if skip_formatting:
+        logger.info(f"{log_prefix} Пропускаю финальное форматирование (skip_formatting=True). Возвращаю 'merged_data'.")
+        end_total_time = time.time()
+        logger.info(f"{log_prefix} --- Цикл сбора данных (raw) завершен за {end_total_time - start_total_time:.2f} сек. ---")
+        return merged_data # Возвращаем сырые, но слитые данные
+    # ------------------------------------------------------------------
+
 
     # 5. Финальное форматирование
     logger.info(f"{log_prefix} Начинаю финальное форматирование...")
@@ -201,4 +226,3 @@ async def fetch_market_data(coins: List[Dict], timeframe: str, prefetched_fr_dat
     end_total_time = time.time()
     logger.info(f"{log_prefix} --- Цикл сбора данных завершен за {end_total_time - start_total_time:.2f} сек. ---")
     return final_structured_data
-

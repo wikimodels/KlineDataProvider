@@ -19,6 +19,18 @@ except ImportError:
         logging.error("WORKER: Заглушка run_fr_update_process вызвана.")
 # ----------------------------------------------------
 
+# --- ИЗМЕНЕНИЕ: Импортируем data_processing для форматирования 4h ---
+try:
+    from data_collector import data_processing
+except ImportError:
+    logging.critical("WORKER: Не удалось импортировать data_processing.")
+    # Фоллбэк
+    class data_processing:
+        @staticmethod
+        def format_final_structure(data, coins, tf): return {}
+# -----------------------------------------------------------------
+
+
 # (Импорт config)
 try:
     from config import REDIS_TASK_QUEUE_KEY, WORKER_LOCK_KEY, WORKER_LOCK_TIMEOUT_SECONDS
@@ -52,7 +64,7 @@ def _load_global_fr_cache() -> Optional[Dict[str, List[Dict]]]:
 
 async def _process_single_timeframe_task(timeframe: str, global_fr_data: Optional[Dict]):
     """
-    (Код не изменен)
+    (Код не изменен - он по-прежнему получает данные С форматированием)
     """
     log_prefix = f"[{timeframe.upper()}]"
     logger.info(f"{log_prefix} WORKER: Начинаю стандартную задачу...")
@@ -69,7 +81,7 @@ async def _process_single_timeframe_task(timeframe: str, global_fr_data: Optiona
     if global_fr_data is None:
          logger.warning(f"{log_prefix} WORKER: 'cache:global_fr' не загружен. Klines/OI будут собраны без FR.")
 
-    # 3. Fetch Klines/OI
+    # 3. Fetch Klines/OI (БЕЗ skip_formatting=True - форматирование включено)
     market_data = await data_collector.fetch_market_data(
         coins_from_api,
         timeframe,
@@ -88,7 +100,7 @@ async def _process_single_timeframe_task(timeframe: str, global_fr_data: Optiona
 
 async def _process_4h_and_8h_task(global_fr_data: Optional[Dict]):
     """
-    (Код не изменен)
+    (Код ИЗМЕНЕН - разделяем поток 4h и 8h)
     """
     log_prefix = "[4H/8H]"
     logger.info(f"{log_prefix} WORKER: Начинаю специальную задачу (4h + 8h)...")
@@ -105,31 +117,42 @@ async def _process_4h_and_8h_task(global_fr_data: Optional[Dict]):
     if global_fr_data is None:
          logger.warning(f"{log_prefix} WORKER: 'cache:global_fr' не загружен. Klines/OI будут собраны без FR.")
 
-    # 3. Fetch Klines/OI
+    # --- ИЗМЕНЕНИЕ: 3. Fetch Klines/OI (СЫРЫЕ данные) ---
     master_market_data = await data_collector.fetch_market_data(
-        coins_from_api, '4h', prefetched_fr_data=global_fr_data 
+        coins_from_api, 
+        '4h', 
+        prefetched_fr_data=global_fr_data,
+        skip_formatting=True # <-- 1. Получаем СЫРЫЕ (только слитые) данные
     )
-    if not master_market_data or ("data" not in master_market_data):
-        logger.error(f"{log_prefix} WORKER: Сборщик Klines/OI (master) вернул некорректный ответ.")
+    if not master_market_data: # (Проверяем на пустой dict, т.к. 'data' еще нет)
+        logger.error(f"{log_prefix} WORKER: Сборщик Klines/OI (master) вернул некорректный ответ (None или {{}}).")
         return
     
-    logger.info(f"{log_prefix} WORKER: Мастер-данные (Klines/OI/FR 4h) собраны. Начинаю 'раскидывать'...")
+    logger.info(f"{log_prefix} WORKER: Мастер-данные (Klines/OI/FR 4h, СЫРЫЕ) собраны. Начинаю 'раскидывать'...")
 
     # 4. "Раскидываем"
     try:
-        # --- Процесс 4h ---
-        logger.info("[4H] WORKER: Обрабатываю данные для '4h'...")
-        save_to_cache('4h', master_market_data) 
+        # --- Процесс 8h (ПЕРВЫМ, использует СЫРЫЕ данные) ---
+        logger.info("[8H] WORKER: Обрабатываю данные для '8h' (из сырых)...")
+        # 2. Передаем СЫРЫЕ данные в 8h-агрегатор
+        await generate_and_save_8h_cache(master_market_data, coins_from_api) 
+        
+        # --- Процесс 4h (ВТОРЫМ, форматируем и сохраняем) ---
+        logger.info("[4H] WORKER: Обрабатываю данные для '4h' (форматирование)...")
+        # 3. Форматируем 4h данные (здесь происходит обрезка неполной свечи)
+        formatted_4h_data = data_processing.format_final_structure(
+            master_market_data, coins_from_api, '4h'
+        )
+        
+        # 4. Сохраняем 4h
+        save_to_cache('4h', formatted_4h_data) 
         logger.info("[4H] WORKER: Данные 4h (для всех монет) успешно сохранены в cache:4h.")
-
-        # --- Процесс 8h ---
-        logger.info("[8H] WORKER: Обрабатываю данные для '8h'...")
-        await generate_and_save_8h_cache(master_market_data, coins_from_api)
         
         logger.info(f"{log_prefix} WORKER: Задача (4h + 8h) успешно завершена.")
 
     except Exception as e_split:
         logger.error(f"{log_prefix} WORKER: Ошибка на этапе 'раскидывания' данных: {e_split}", exc_info=True)
+    # --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
 
 # --- ИЗМЕНЕНИЕ: Обновляем роутер задач _process_task ---
