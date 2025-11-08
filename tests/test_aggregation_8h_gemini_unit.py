@@ -284,9 +284,14 @@ async def test_generate_calls_build_from_end(
     mock_merge.return_value = {"BTCUSDT": "merged"}
     mock_format.return_value = {"data": "formatted"}
 
-    # Входные данные (4h)
+    # --- ИЗМЕНЕНИЕ: Входные данные (4h) теперь в "сыром" (merged) формате ---
     candles_4h = [make_candle(0), make_candle(FOUR_HOURS)]
-    data_4h = {"data": [{"symbol": "BTCUSDT", "data": candles_4h}]}
+    # (Старый формат: {"data": [{"symbol": "BTCUSDT", "data": candles_4h}]})
+    data_4h = {
+        "BTCUSDT": candles_4h
+    }
+    # --- КОНЕЦ ИЗМЕНЕНИЯ ---
+    
     coins_list = [{"symbol": "BTCUSDT"}]
 
     # 2. Вызов
@@ -325,8 +330,14 @@ async def test_generate_skips_if_no_klines(
     # _build_8h_candles_from_end вернет [] для klines
     mock_build_from_end.return_value = [] 
     
+    # --- ИЗМЕНЕНИЕ: Входные данные (4h) теперь в "сыром" (merged) формате ---
     candles_4h = [make_candle(0), make_candle(FOUR_HOURS)]
-    data_4h = {"data": [{"symbol": "BTCUSDT", "data": candles_4h}]}
+    # (Старый формат: {"data": [{"symbol": "BTCUSDT", "data": candles_4h}]})
+    data_4h = {
+        "BTCUSDT": candles_4h
+    }
+    # --- КОНЕЦ ИЗМЕНЕНИЯ ---
+    
     coins_list = [{"symbol": "BTCUSDT"}]
 
     await generate_and_save_8h_cache(data_4h, coins_list)

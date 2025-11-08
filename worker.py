@@ -19,17 +19,7 @@ except ImportError:
         logging.error("WORKER: Заглушка run_fr_update_process вызвана.")
 # ----------------------------------------------------
 
-# --- ИЗМЕНЕНИЕ: Импортируем data_processing для форматирования 4h ---
-try:
-    from data_collector import data_processing
-except ImportError:
-    logging.critical("WORKER: Не удалось импортировать data_processing.")
-    # Фоллбэк
-    class data_processing:
-        @staticmethod
-        def format_final_structure(data, coins, tf): return {}
-# -----------------------------------------------------------------
-
+# --- ИЗМЕНЕНИЕ: Удален ошибочный импорт 'from data_collector import data_processing' ---
 
 # (Импорт config)
 try:
@@ -100,7 +90,7 @@ async def _process_single_timeframe_task(timeframe: str, global_fr_data: Optiona
 
 async def _process_4h_and_8h_task(global_fr_data: Optional[Dict]):
     """
-    (Код ИЗМЕНЕН - разделяем поток 4h и 8h)
+    (Код ИЗМЕНЕН - исправлен путь к data_processing)
     """
     log_prefix = "[4H/8H]"
     logger.info(f"{log_prefix} WORKER: Начинаю специальную задачу (4h + 8h)...")
@@ -139,10 +129,11 @@ async def _process_4h_and_8h_task(global_fr_data: Optional[Dict]):
         
         # --- Процесс 4h (ВТОРЫМ, форматируем и сохраняем) ---
         logger.info("[4H] WORKER: Обрабатываю данные для '4h' (форматирование)...")
-        # 3. Форматируем 4h данные (здесь происходит обрезка неполной свечи)
-        formatted_4h_data = data_processing.format_final_structure(
+        # --- ИЗМЕНЕНИЕ: Используем правильный путь data_collector.data_processing ---
+        formatted_4h_data = data_collector.data_processing.format_final_structure(
             master_market_data, coins_from_api, '4h'
         )
+        # --- КОНЕЦ ИЗМЕНЕНИЯ ---
         
         # 4. Сохраняем 4h
         save_to_cache('4h', formatted_4h_data) 
@@ -158,8 +149,7 @@ async def _process_4h_and_8h_task(global_fr_data: Optional[Dict]):
 # --- ИЗМЕНЕНИЕ: Обновляем роутер задач _process_task ---
 async def _process_task(task_name: str):
     """
-    Главный роутер задач. Вызывается из background_worker.
-    Распознает 'fr' или таймфреймы.
+    (Код не изменен)
     """
     log_prefix = f"[{task_name.upper()}]"
     
@@ -188,10 +178,7 @@ async def _process_task(task_name: str):
             
 async def background_worker():
     """
-    Основной цикл воркера.
-    Берет задачу (timeframe или 'fr') из Redis (LPOP), получает блокировку, 
-    вызывает роутер _process_task.
-    (Код этой функции не изменен)
+    (Код не изменен)
     """
     task_name: str = "" # (Переименовал timeframe в task_name)
     log_prefix = "[WORKER]"
