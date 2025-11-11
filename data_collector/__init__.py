@@ -18,7 +18,7 @@ from .fetch_strategies import CONCURRENCY_LIMIT
 # --- Используем logger напрямую ---
 import logging
 logger = logging.getLogger(__name__)
-oi_fr_error_logger = logging.getLogger('oi_fr_errors')
+# --- ИЗМЕНЕНИЕ: oi_fr_error_logger УДАЛЕН ---
 # ---------------------------------
 
 
@@ -135,9 +135,10 @@ async def fetch_market_data(coins: List[Dict], timeframe: str, prefetched_fr_dat
             if isinstance(result, Exception):
                 failed_tasks_count += 1
                 msg = f"FETCH_GATHER: Запрос провален: {symbol} ({data_type}, {exchange}). Ошибка: {result}. URL: {url}"
+                # --- ИЗМЕНЕНИЕ: Используем logger.error ---
                 logger.error(f"{log_prefix} {msg}")
                 if data_type == 'oi': # Логируем только ошибки OI отдельно
-                    oi_fr_error_logger.error(f"{log_prefix} {msg}")
+                    logger.warning(f"{log_prefix} {msg}") # Используем warning, т.к. это ожидаемо
                 continue
 
             _, raw_data = result
@@ -147,9 +148,10 @@ async def fetch_market_data(coins: List[Dict], timeframe: str, prefetched_fr_dat
 
             if not raw_data:
                 msg = f"PARSER: Нет raw_data для {symbol} ({data_type}, {exchange}). Запрос вернул пустой ответ. URL: {url}"
+                # --- ИЗМЕНЕНИЕ: Используем logger.warning ---
                 logger.warning(f"{log_prefix} {msg}")
                 if data_type == 'oi':
-                    oi_fr_error_logger.warning(f"{log_prefix} {msg}")
+                    logger.warning(f"{log_prefix} {msg}")
                 continue
 
             parser_func = task['parser']
@@ -169,9 +171,10 @@ async def fetch_market_data(coins: List[Dict], timeframe: str, prefetched_fr_dat
         except Exception as e:
             failed_tasks_count += 1 # Считаем ошибку парсинга как провал задачи
             msg = f"PARSER: Ошибка парсинга {symbol} ({data_type}, {exchange}): {e}. URL: {url}"
+            # --- ИЗМЕНЕНИЕ: Используем logger.error ---
             logger.error(f"{log_prefix} {msg}", exc_info=True)
             if data_type == 'oi':
-                oi_fr_error_logger.error(f"{log_prefix} {msg}")
+                logger.error(f"{log_prefix} {msg}")
 
     end_parse_time = time.time()
     logger.info(f"{log_prefix} Парсинг Klines/OI завершен за {end_parse_time - start_parse_time:.2f} сек.")

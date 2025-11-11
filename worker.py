@@ -1,3 +1,4 @@
+
 import asyncio
 import logging
 import time
@@ -90,7 +91,7 @@ async def _process_single_timeframe_task(timeframe: str, global_fr_data: Optiona
 
 async def _process_4h_and_8h_task(global_fr_data: Optional[Dict]):
     """
-    (Код ИЗМЕНЕН - исправлен путь к data_processing)
+    (Код ИЗМЕНЕН - исправлен путь к data_processing и добавлена логика 8h)
     """
     log_prefix = "[4H/8H]"
     logger.info(f"{log_prefix} WORKER: Начинаю специальную задачу (4h + 8h)...")
@@ -122,20 +123,33 @@ async def _process_4h_and_8h_task(global_fr_data: Optional[Dict]):
 
     # 4. "Раскидываем"
     try:
-        # --- Процесс 8h (ПЕРВЫМ, использует СЫРЫЕ данные) ---
-        logger.info("[8H] WORKER: Обрабатываю данные для '8h' (из сырых)...")
-        # 2. Передаем СЫРЫЕ данные в 8h-агрегатор
-        await generate_and_save_8h_cache(master_market_data, coins_from_api) 
+        # --- 4.1. [НОВОЕ] Подготовка данных для 8h (Отсечение [:-1]) ---
+        logger.info(f"{log_prefix} [8H_PREP] Готовлю 4h-данные для 8h-агрегатора (применяю отсечение [:-1])...")
+        data_for_8h = defaultdict(dict)
+        for symbol, data_types in master_market_data.items():
+            # (Мы создаем копии списков, отсекая последний элемент)
+            data_for_8h[symbol]['klines'] = data_types.get('klines', [])[:-1]
+            data_for_8h[symbol]['oi'] = data_types.get('oi', [])[:-1]
+            data_for_8h[symbol]['fr'] = data_types.get('fr', [])[:-1]
         
-        # --- Процесс 4h (ВТОРЫМ, форматируем и сохраняем) ---
-        logger.info("[4H] WORKER: Обрабатываю данные для '4h' (форматирование)...")
+        logger.info(f"{log_prefix} [8H_PREP] Отсечение [:-1] применено для {len(master_market_data)} монет.")
+        # --- КОНЕЦ НОВОГО БЛОКА ---
+
+        # --- 4.2. Процесс 8h (ПЕРВЫМ, использует ОЧИЩЕННЫЕ данные) ---
+        logger.info("[8H] WORKER: Обрабатываю данные для '8h' (из очищенных [:-1] данных)...")
+        # 2. Передаем ОЧИЩЕННЫЕ данные в 8h-агрегатор
+        await generate_and_save_8h_cache(data_for_8h, coins_from_api) 
+        
+        # --- 4.3. Процесс 4h (ВТОРЫМ, форматируем и сохраняем ОРИГИНАЛ) ---
+        logger.info("[4H] WORKER: Обрабатываю данные для '4h' (форматирование ОРИГИНАЛА)...")
         # --- ИЗМЕНЕНИЕ: Используем правильный путь data_collector.data_processing ---
+        # (Передаем ОРИГИНАЛЬНЫЙ master_market_data, т.к. format_final_structure сам делает [:-1])
         formatted_4h_data = data_collector.data_processing.format_final_structure(
             master_market_data, coins_from_api, '4h'
         )
         # --- КОНЕЦ ИЗМЕНЕНИЯ ---
         
-        # 4. Сохраняем 4h
+        # 4.4. Сохраняем 4h
         save_to_cache('4h', formatted_4h_data) 
         logger.info("[4H] WORKER: Данные 4h (для всех монет) успешно сохранены в cache:4h.")
         

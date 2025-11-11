@@ -1,4 +1,5 @@
 from typing import List, Dict, Any, Optional
+import math # <-- НОВЫЙ ИМПОРТ
 
 # Импортируем из родительской директории
 try:
@@ -15,6 +16,27 @@ except ImportError:
 
 # Импортируем из текущей папки
 from . import fetch_strategies
+
+
+# --- НОВЫЙ ХЕЛПЕР ---
+def _calculate_oi_limit(timeframe: str) -> int:
+    """
+    Рассчитывает лимит для OI, чтобы уложиться в 30 дней (720 часов).
+    """
+    if timeframe == '1h':
+        return 400 # (1h * 400 = 400h. Меньше 720h, оставляем)
+    if timeframe == '4h':
+        return math.ceil(720 / 4) # 180
+    if timeframe == '8h':
+        return math.ceil(720 / 8) # 90
+    if timeframe == '12h':
+        return math.ceil(720 / 12) # 60
+    if timeframe == '1d':
+        return 30 # (30 дней)
+    
+    # Фоллбэк (если '1m' или др.)
+    return 30 
+# --- КОНЕЦ НОВОГО ХЕЛПЕРА ---
 
 
 def prepare_fr_tasks(coins: List[Dict]) -> List[Dict[str, Any]]:
@@ -68,7 +90,7 @@ def prepare_fr_tasks(coins: List[Dict]) -> List[Dict[str, Any]]:
 
 def prepare_tasks(coins: List[Dict], timeframe: str, prefetched_fr_data: Optional[Dict] = None) -> List[Dict[str, Any]]:
     """
-    (Код этой функции не изменен, кроме вызова логгера)
+    (Код этой функции ИЗМЕНЕН)
     """
     tasks_to_run = []
     log_prefix = f"[{timeframe.upper()}_TASK_BUILDER]"
@@ -79,8 +101,12 @@ def prepare_tasks(coins: List[Dict], timeframe: str, prefetched_fr_data: Optiona
         symbol_api = symbol_path.replace('/', '')
         exchange = 'binance' if 'binance' in coin['exchanges'] else 'bybit'
         api_timeframe = '4h' if timeframe == '8h' else timeframe
+        
+        # --- ИЗМЕНЕНИЕ: Klines limit ВОССТАНОВЛЕН ---
         klines_limit = 800 if timeframe in ['4h', '8h'] else 400
-        oi_limit = 400
+        # --- ИЗМЕНЕНИЕ: OI limit ДИНАМИЧЕСКИЙ ---
+        oi_limit = _calculate_oi_limit(api_timeframe)
+        
         base_task_info = { "symbol": symbol_path, "exchange": exchange }
 
         klines_url_func = getattr(url_builder, f"get_{exchange}_klines_url", None)
@@ -118,12 +144,14 @@ def prepare_tasks(coins: List[Dict], timeframe: str, prefetched_fr_data: Optiona
             # ... (остальная логика) ...
             strategy_func = None
             url = None
-            current_limit = oi_limit
+            
             if data_type == 'oi':
-                 url = url_func(symbol_api, api_timeframe, current_limit)
+                 # --- ИЗМЕНЕНИЕ: Используем oi_limit ---
+                 url = url_func(symbol_api, api_timeframe, oi_limit)
             elif data_type == 'fr':
                  fr_limit_url = 400
                  url = url_func(symbol_api, fr_limit_url)
+                 
             if exchange == 'binance':
                 strategy_func = fetch_strategies.fetch_simple
             elif exchange == 'bybit':

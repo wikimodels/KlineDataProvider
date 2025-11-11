@@ -13,7 +13,6 @@ from typing import List, Dict, Any, Optional
 
 # --- Используем логгер из родительского пакета ---
 try:
-    # --- ИЗМЕНЕНИЕ: Убрали oi_fr_error_logger ---
     from .logging_setup import logger
 except ImportError:
     # Фоллбэк для standalone запуска
@@ -110,7 +109,6 @@ def parse_bybit_klines(raw_data: List[List[str]], timeframe: str) -> List[Dict[s
     """
     Парсит Klines (свечи) от Bybit V5.
     Bybit НЕ предоставляет taker volume, поэтому volumeDelta будет None (kline.get() вернет None).
-    (Код не изменен)
     """
     parsed_klines = []
     try:
@@ -120,6 +118,12 @@ def parse_bybit_klines(raw_data: List[List[str]], timeframe: str) -> List[Dict[s
                 continue
 
             open_time = int(kline[0])
+            
+            # --- ИСПРАВЛЕНИЕ: Правильно вычисляем closeTime ---
+            from ..api_helpers import get_interval_duration_ms
+            duration_ms = get_interval_duration_ms(timeframe)
+            close_time = open_time + duration_ms - 1
+            
             parsed_klines.append({
                 "openTime": open_time,
                 "openPrice": float(kline[1]),
@@ -127,7 +131,7 @@ def parse_bybit_klines(raw_data: List[List[str]], timeframe: str) -> List[Dict[s
                 "lowPrice": float(kline[3]),
                 "closePrice": float(kline[4]),
                 "volume": float(kline[5]),
-                "closeTime": open_time + 1,
+                "closeTime": close_time,  # <-- Теперь правильно!
                 # volumeDelta здесь не будет, что нормально
             })
         # Bybit возвращает klines в обратном порядке (от новых к старым)

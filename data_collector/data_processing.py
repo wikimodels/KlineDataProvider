@@ -16,7 +16,7 @@ except ImportError:
 
 def merge_data(processed_data: Dict[str, Dict[str, list]]) -> Dict[str, list]:
     """
-    Объединяет klines, oi и fr данные для каждой монеты.
+    (Код этой функции не изменен)
     """
     final_data = {}
 
@@ -80,7 +80,7 @@ def format_final_structure(market_data: Dict[str, list], coins: List[Dict], time
     Форматирует собранные данные в финальную структуру с метаданными,
     включает 'audit_report' и ОБРЕЗАЕТ данные до 399 свечей.
     
-    (Код этой функции не изменен)
+    (Код ИЗМЕНЕН - добавлена проверка для '8h')
     """
     missing_klines_symbols = []
     missing_oi_symbols = []
@@ -100,9 +100,17 @@ def format_final_structure(market_data: Dict[str, list], coins: List[Dict], time
         if not candles:
             continue
 
-        # --- Обрезка свечей (399) ---
-        candles_completed = candles[:-1]
+        # --- ИЗМЕНЕНИЕ: Обрезка свечей (399) ---
+        
+        # Для 8h данные УЖЕ агрегированы и полны. Обрезка [:-1] не нужна.
+        if timeframe == '8h':
+            candles_completed = candles
+        else:
+            # Для 1h, 4h и т.д. - удаляем последнюю (неполную) свечу
+            candles_completed = candles[:-1]
+            
         final_candles = candles_completed[-399:]
+        # --- КОНЕЦ ИЗМЕНЕНИЯ ---
         # ------------------------------------
 
         if not final_candles:
