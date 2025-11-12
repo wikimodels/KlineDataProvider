@@ -8,6 +8,10 @@ try:
     from api_helpers import get_interval_duration_ms
     from cache_manager import save_to_cache
     from .logging_setup import logger
+    # --- ИЗМЕНЕНИЕ №1: Импортируем 'redis_conn' из cache_manager ---
+    # (Хотя save_to_cache импортирован, redis_conn нужен для вызова)
+    # --- ИСПРАВЛЕНО: redis_conn не нужен, он передается в save_to_cache ---
+    from cache_manager import get_redis_connection # Нужен для save_to_cache
     from .data_processing import merge_data, format_final_structure
 
 except ImportError:
@@ -18,7 +22,8 @@ except ImportError:
         if tf == '4h': return 4 * 3600 * 1000
         if tf == '8h': return 8 * 3600 * 1000
         return 0
-    def save_to_cache(tf, data): pass
+    async def save_to_cache(redis_conn, tf, data): pass
+    async def get_redis_connection(): return None
     def merge_data(data): return {}
     def format_final_structure(data, coins, tf): return {}
 
@@ -109,13 +114,9 @@ def _aggregate_funding_rates(candle1: Dict, candle2: Dict) -> Optional[Dict]:
     return None
 
 
-# --- ИЗМЕНЕНИЕ: ЛОГИКА ПОСТРОЕНИЯ ПОЛНОЙ ИСТОРИИ ---
 def _build_8h_candles_from_end(candles_4h: List[Dict], data_type: str, symbol: str) -> List[Dict]:
     """
-    (Логика ПОЛНОСТЬЮ ПЕРЕПИСАНА)
-    Строит ПОЛНУЮ историю 8h-свечей из 4h-свечей,
-    начиная с "якоря" (00, 08, 16 UTC) с конца.
-    Отбрасывает "осиротевшие" свечи в начале.
+    (Логика ПОЛНОСТЬЮ ПЕРЕПИСАНА) -> (Остается без изменений с прошлого раза)
     """
     if not candles_4h:
         return []
@@ -143,22 +144,17 @@ def _build_8h_candles_from_end(candles_4h: List[Dict], data_type: str, symbol: s
         close_time = candle2.get('closeTime')
         
         if close_time and _is_8h_close_time_ms(close_time):
-            # Нашли якорь (например, свечу C3 20:00-23:59)
             break
         
         i -= 1
 
     # 2. Если якорь найден (i >= 1), начинаем строить 8h свечи с шагом 2
-    # (Если якорь не найден, i будет 0 или -1, и цикл while не запустится)
-    
     while i >= 1:
         candle2 = candles_4h[i]
         candle1 = candles_4h[i - 1]
         
-        # Проверяем смежность (C2 16:00-19:59 + C3 20:00-23:59)
+        # Проверяем смежность
         if candle2.get('openTime') != (candle1.get('closeTime', 0) + 1):
-             # Свечи не смежные (разрыв). Это ломает 8h-цепь.
-             # Ищем следующий якорь, сдвигаясь на 1 (не на 2)
              i -= 1
              continue
 
@@ -167,27 +163,27 @@ def _build_8h_candles_from_end(candles_4h: List[Dict], data_type: str, symbol: s
         if agg_candle:
             result.append(agg_candle)
         
-        # Переходим к следующей ПАРЕ
         i -= 2
     
     # 3. Возвращаем результат (от старых к новым)
     result.reverse()
     
-    # --- НОВЫЙ АГРЕГИРУЮЩИЙ ЛОГ (ПОСЛЕ ЦИКЛА) ---
     logger.debug(f"[8H_GEN_CORE] {symbol} ({data_type}): Построено {len(result)} 8h-свечей из {len(candles_4h)} 4h-свечей.")
     
     return result
-# --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
 
-async def generate_and_save_8h_cache(data_4h: Dict, coins_from_api: List[Dict]):
+# --- ИЗМЕНЕНИЕ №1: Адаптация к формату final_structured_data (из кэша 4h) ---
+async def generate_and_save_8h_cache(
+    data_4h_list: List[Dict], 
+    coins_from_api: List[Dict]
+):
     """
-    (Код ИЗМЕНЕН - добавлены агрегирующие логи)
     Генерирует и сохраняет 8h кэш из 4h данных.
     
     Args:
-        data_4h: Словарь с 4h данными (ОЧИЩЕННЫМИ, [:-1] формат)
-                 Ожидаемый формат: {'BTCUSDT': {'klines': [...], 'oi': [...]}, ...}
+        data_4h_list: Список данных 4h из кэша.
+                 Ожидаемый формат: [{"symbol": "BTCUSDT", "data": [...]}, ...]
         coins_from_api: Список монет с биржи
     """
     logger.info("[8H_GEN] Начинаю генерацию данных 8h из (очищенных [:-1]) данных 4h...")
@@ -195,59 +191,59 @@ async def generate_and_save_8h_cache(data_4h: Dict, coins_from_api: List[Dict]):
 
     processed_data_8h = defaultdict(dict)
     
-    # --- НОВОЕ: Статистика для лога ---
     symbols_with_data_count = 0
     symbols_processed_count = 0
     symbols_skipped_no_klines_count = 0
-    # -----------------------------------
 
-    if not data_4h:
-        logger.warning("[8H_GEN] Нет данных 'data_4h' (пустой dict). Генерация 8h невозможна.")
+    # --- ИЗМЕНЕНИЕ №1: Проверяем, что data_4h_list это список ---
+    if not data_4h_list or not isinstance(data_4h_list, list):
+        logger.warning(f"[8H_GEN] Нет данных 'data_4h_list' (None или не список). Генерация 8h невозможна.")
         return
 
-    # Обрабатываем каждую монету
-    for symbol, data_types in data_4h.items():
+    # --- ИЗМЕНЕНИЕ №1: Итерация по списку (формат final_structured_data) ---
+    for coin_data in data_4h_list:
         
-        candles_4h = data_types.get('klines', [])
+        symbol = coin_data.get('symbol')
+        # 'data' в этом формате УЖЕ содержит СМЕРЖЕННЫЕ (klines+oi+fr) свечи 4h
+        candles_4h = coin_data.get('data', []) 
         
-        # Пропускаем монеты без символа или данных, или с недостаточным количеством свечей
         if not symbol or not candles_4h or len(candles_4h) < 2:
             continue
         
         symbols_with_data_count += 1
-        oi_4h = data_types.get('oi', [])
-        fr_4h = data_types.get('fr', [])
+        
+        # --- ИЗМЕНЕНИЕ №1: Так как данные уже смержены, ---
+        # --- мы передаем один и тот же список свечей (candles_4h) ---
+        # --- во все функции агрегации. ---
+        oi_4h = candles_4h
+        fr_4h = candles_4h
+        # --------------------------------------------------
 
         # Агрегируем разные типы данных отдельно
-        # (Передаем symbol для лога)
         klines_8h = _build_8h_candles_from_end(candles_4h, 'klines', symbol)
         ois_8h = _build_8h_candles_from_end(oi_4h, 'oi', symbol)
         frs_8h = _build_8h_candles_from_end(fr_4h, 'fr', symbol)
 
-        # Если не удалось создать klines - пропускаем монету
         if not klines_8h:
              logger.debug(f"[8H_GEN] _build_8h_candles_from_end(klines) вернул [] для {symbol}. Пропускаю монету.")
              symbols_skipped_no_klines_count += 1
              continue 
 
-        # Сохраняем агрегированные данные
         processed_data_8h[symbol]['klines'] = klines_8h
         processed_data_8h[symbol]['oi'] = ois_8h
         processed_data_8h[symbol]['fr'] = frs_8h 
         symbols_processed_count += 1
+    # --- КОНЕЦ ИЗМЕНЕНИЯ №1 ---
 
-    # --- НОВЫЙ АГРЕГИРУЮЩИЙ ЛОГ (ПОСЛЕ ЦИКЛА) ---
     logger.info(f"[8H_GEN] Агрегация 4h->8h завершена. "
                 f"Всего монет с 4h-данными: {symbols_with_data_count}. "
                 f"Успешно обработано (созданы 8h klines): {symbols_processed_count}. "
                 f"Пропущено (не удалось создать 8h klines): {symbols_skipped_no_klines_count}.")
-    # ----------------------------------------------
 
     if not processed_data_8h:
         logger.error("[8H_GEN] Нет данных для обработки после агрегации. Кэш 8h не будет создан.")
         return
 
-    # Объединяем данные (klines, oi, fr) в единую структуру
     logger.info(f"[8H_GEN] Начинаю слияние данных 8h...")
     merged_8h_data = merge_data(processed_data_8h)
     logger.info(f"[8H_GEN] Слияние данных 8h завершено для {len(merged_8h_data)} монет.")
@@ -256,14 +252,18 @@ async def generate_and_save_8h_cache(data_4h: Dict, coins_from_api: List[Dict]):
         logger.error("[8H_GEN] Нет данных после слияния 8h. Кэш 8h не будет создан.")
         return
 
-    # Форматируем в финальную структуру
     logger.info("[8H_GEN] Начинаю форматирование структуры 8h...")
-    # (Передаем data_4h.keys(), чтобы аудит-репорт был полным, даже если 8h не сгенерились)
     formatted_8h_data = format_final_structure(merged_8h_data, coins_from_api, '8h')
     logger.info(f"[8H_GEN] Форматирование структуры 8h завершено ({len(formatted_8h_data.get('data',[]))} монет).")
 
-    # Сохраняем в кэш
-    save_to_cache('8h', formatted_8h_data)
+    # --- ИЗМЕНЕНИЕ №1: Получаем redis_conn для сохранения ---
+    redis_conn = await get_redis_connection()
+    if not redis_conn:
+        logger.error("[8H_GEN] Не удалось получить Redis соединение. Кэш 8h не сохранен.")
+        return
+        
+    await save_to_cache(redis_conn, '8h', formatted_8h_data)
+    # --- КОНЕЦ ИЗМЕНЕНИЯ №1 ---
 
     end_time = time.time()
     logger.info(f"[8H_GEN] Весь процесс генерации и сохранения кэша 8h занял {end_time - start_time:.2f} сек.")

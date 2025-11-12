@@ -2,7 +2,7 @@ import pytest
 import os
 
 # Импортируем тестируемую функцию
-from coin_source import get_coins_from_api
+from data_collector.coin_source import get_coins_from_api
 from config import COIN_SIFTER_BASE_URL, COIN_PROCESSING_LIMIT
 
 # Помечаем тест как "slow" и пропускаем его по умолчанию.

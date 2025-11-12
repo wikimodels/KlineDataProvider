@@ -102,7 +102,7 @@ async def test_get_cached_data_not_found(test_client: AsyncClient, mock_redis: F
 @pytest.mark.asyncio
 async def test_trigger_fr_update_success(test_client: AsyncClient, mock_redis: FakeRedis):
     """
-    Тест: Успешный POST /api/v1/internal/update-fr (202 Accepted).
+    Тест: Успешный POST ""/internal/update-fr (202 Accepted).
     Проверяет, что задача 'fr' добавлена в очередь Redis.
     """
     # 1. Убедимся, что воркер свободен и очередь пуста
@@ -114,7 +114,7 @@ async def test_trigger_fr_update_success(test_client: AsyncClient, mock_redis: F
     headers = {"Authorization": f"Bearer {test_token}"}
     
     response = await test_client.post(
-        "/api/v1/internal/update-fr",
+        """/internal/update-fr",
         headers=headers
     )
 
@@ -143,7 +143,7 @@ async def test_trigger_fr_update_conflict_lock(test_client: AsyncClient, mock_re
     headers = {"Authorization": f"Bearer {test_token}"}
 
     response = await test_client.post(
-        "/api/v1/internal/update-fr",
+        """/internal/update-fr",
         headers=headers
     )
 
@@ -157,7 +157,7 @@ async def test_trigger_fr_update_conflict_lock(test_client: AsyncClient, mock_re
 async def test_trigger_fr_update_invalid_secret(test_client: AsyncClient):
     """Тест: trigger_fr_update с неверной аутентификацией."""
     response = await test_client.post(
-        "/api/v1/internal/update-fr",
+        """/internal/update-fr",
         headers={"Authorization": "Bearer wrong_secret"}
     )
     assert response.status_code == 403
@@ -167,7 +167,7 @@ async def test_trigger_fr_update_invalid_secret(test_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_trigger_fr_update_missing_auth_header(test_client: AsyncClient):
     """Тест: trigger_fr_update без заголовка аутентификации."""
-    response = await test_client.post("/api/v1/internal/update-fr")
+    response = await test_client.post("""/internal/update-fr")
     assert response.status_code == 403
 
 # ---

@@ -1,3 +1,4 @@
+# url_builder.py
 """
 Этот модуль отвечает за ФОРМИРОВАНИЕ URL-адресов
 для запросов к API бирж (Binance, Bybit).
@@ -60,13 +61,16 @@ def get_bybit_open_interest_url(symbol_api: str, period: str, limit: int = 400) 
     Формирует URL для получения Open Interest (OI) с Bybit V5 (Linear).
     Bybit использует intervalType (1h, 4h, ...).
     """
-    # Bybit V5 OI: limit (макс 200) устанавливается в fetch_strategies.
-    # Bybit использует 'period' (1h, 4h) как 'intervalTime'
-    return f"{BYBIT_BASE_URL}/v5/market/open-interest?category=linear&symbol={symbol_api}&intervalTime={period}"
+    # Bybit V5 OI: limit (макс 200).
+    # --- ИСПРАВЛЕНИЕ 1: Добавляем параметр limit ---
+    limit = min(limit, 200)
+    return f"{BYBIT_BASE_URL}/v5/market/open-interest?category=linear&symbol={symbol_api}&intervalTime={period}&limit={limit}"
 
 def get_bybit_funding_rate_url(symbol_api: str, limit: int = 400) -> str:
     """
     Формирует URL для получения Funding Rate (FR) с Bybit V5 (Linear).
     """
-    # Bybit V5 FR: limit (макс 100) устанавливается в fetch_strategies.
-    return f"{BYBIT_BASE_URL}/v5/market/funding/history?category=linear&symbol={symbol_api}"
+    # Bybit V5 FR: limit (макс 100).
+    # --- ИСПРАВЛЕНИЕ 2: Добавляем параметр limit ---
+    limit = min(limit, 100)
+    return f"{BYBIT_BASE_URL}/v5/market/funding/history?category=linear&symbol={symbol_api}&limit={limit}"

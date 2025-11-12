@@ -2,52 +2,40 @@ import os
 from dotenv import load_dotenv
 
 # Загружаем переменные из .env файла, чтобы os.environ их "увидел"
-# (Это позволяет нам читать переменные, определенные в .env)
 load_dotenv()
 
 # ============================================================================
 # === Конфигурация Redis (Upstash) ===
 # ============================================================================
-# (Из .env)
 UPSTASH_REDIS_URL = os.environ.get("UPSTASH_REDIS_URL")
 UPSTASH_REDIS_TOKEN = os.environ.get("UPSTASH_REDIS_TOKEN")
 
 # ============================================================================
 # === Ключи Очереди и Блокировки Воркера ===
 # ============================================================================
-# (Ранее были в api_routes.py и worker.py)
 REDIS_TASK_QUEUE_KEY = "data_collector_task_queue"
 WORKER_LOCK_KEY = "data_collector_lock"
 
-# (Ранее было в worker.py)
+# (НОВАЯ КОНСТАНТА для проверки блокировки)
+WORKER_LOCK_VALUE = "processing" # <-- ИСПРАВЛЕНИЕ
+
 WORKER_LOCK_TIMEOUT_SECONDS = 1800 # 30 минут
 
 # ============================================================================
 # === Конфигурация API (Этого Сервера) ===
 # ============================================================================
-# Секрет для защиты эндпоинта /update-fr (из api_routes.py и main.py)
 SECRET_TOKEN = os.environ.get("SECRET_TOKEN")
 
-# (Ранее было в api_routes.py)
-# Таймфреймы, для которых можно ЗАПУСТИТЬ сбор (POST)
-POST_TIMEFRAMES = ['1h', '4h', '12h', '1d']
-# Таймфреймы, из которых можно ПРОЧИТАТЬ кэш (GET)
+POST_TIMEFRAMES = ['1h', '4h', '8h', '12h', '1d']
 ALLOWED_CACHE_KEYS = ['1h', '4h', '8h', '12h', '1d', 'global_fr']
 
 # ============================================================================
 # === Конфигурация Источника Монет (Coin Sifter API) ===
 # ============================================================================
-# (COIN_SIFTER_URL из .env)
 COIN_SIFTER_BASE_URL = os.environ.get("COIN_SIFTER_URL")
-
-# (SECRET_TOKEN из .env, используется для авторизации)
 COIN_SIFTER_API_TOKEN = os.environ.get("SECRET_TOKEN")
-
-# (Из endpoints_description.txt)
 COIN_SIFTER_ENDPOINT_PATH = "/coins/formatted-symbols"
 
-# === НОВЫЙ ЛИМИТ ===
-# Временное ограничение на количество монет для обработки
 COIN_PROCESSING_LIMIT = 250
 # ============================================================================
 
@@ -55,6 +43,7 @@ COIN_PROCESSING_LIMIT = 250
 # ============================================================================
 # === Устаревшее (Legacy) ===
 # ============================================================================
-# (DATABASE_URL из .env)
 DATABASE_URL = os.environ.get("DATABASE_URL")
 # ============================================================================
+TG_BOT_TOKEN_KEY = os.environ.get("TG_BOT_TOKEN")
+TG_USER_KEY = os.environ.get("TG_USER")

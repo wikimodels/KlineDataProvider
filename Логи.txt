@@ -1,0 +1,193 @@
+gcp-us-east4
+
+⚠️ [CRON Wake-Up] KlineProvider ответил: 404
+
+11/12/2025, 7:21:42 PM
+gcp-us-east4
+
+⏳ [CRON Wake-Up] Задержки: CoinSifter — 187s, KlineProvider — 83s
+
+11/12/2025, 7:20:19 PM
+gcp-us-east4
+
+⏰ [CRON Wake-Up] Запуск задачи 'пробуждения'...
+
+11/12/2025, 7:20:19 PM
+gcp-us-east4
+
+✅ [CRON] Все 6 задач сбора данных (1h, 4h, 8h, 12h, 1d, FR) настроены.
+
+11/12/2025, 7:20:19 PM
+gcp-us-east4
+
+   Эндпоинт здоровья: GET /health
+
+11/12/2025, 7:20:19 PM
+gcp-us-east4
+
+🚀 [SERVER] Запущен на http://0.0.0.0:8000
+
+11/12/2025, 7:20:19 PM
+gcp-us-east4
+
+[INFO] Listening on https://127.0.0.1:80/
+
+11/12/2025, 7:20:19 PM
+gcp-us-east4
+
+✅ [ENV] .env загружен (локальный режим)
+
+11/12/2025, 7:20:19 PM
+gcp-us-east4
+
+isolate start time: 24.39 ms (user time: 10.61 ms)
+
+11/12/2025, 7:20:19 PM
+gcp-us-east4
+
+⚠️ [CRON Wake-Up] KlineProvider ответил: 404
+
+11/12/2025, 7:13:14 PM
+gcp-us-east4
+
+✅ [CRON Wake-Up] CoinSifter успешно разбужен (200 OK)
+
+11/12/2025, 7:10:30 PM
+gcp-us-east4
+
+⏳ [CRON Wake-Up] Задержки: CoinSifter — 29s, KlineProvider — 193s
+
+11/12/2025, 7:10:01 PM
+gcp-us-east4
+
+⏰ [CRON Wake-Up] Запуск задачи 'пробуждения'...
+
+11/12/2025, 7:10:01 PM
+gcp-us-east4
+
+❌ [CRON 8h] Сервер вернул ошибку: 422 {"detail":[{"type":"missing","loc":["body","timeframe"],"msg":"Field required","input":{"timeframes":["8h"]}}]}
+
+11/12/2025, 7:06:01 PM
+gcp-us-east4
+
+🚀 [CRON 8h] Запуск задачи сбора данных...
+
+11/12/2025, 7:06:01 PM
+gcp-us-east4
+
+✅ [CRON] Все 6 задач сбора данных (1h, 4h, 8h, 12h, 1d, FR) настроены.
+
+11/12/2025, 7:06:01 PM
+gcp-us-east4
+
+   Эндпоинт здоровья: GET /health
+
+11/12/2025, 7:06:01 PM
+gcp-us-east4
+
+🚀 [SERVER] Запущен на http://0.0.0.0:8000
+
+11/12/2025, 7:06:01 PM
+gcp-us-east4
+
+[INFO] Listening on https://127.0.0.1:80/
+
+11/12/2025, 7:06:01 PM
+gcp-us-east4
+
+✅ [ENV] .env загружен (локальный режим)
+
+11/12/2025, 7:06:01 PM
+gcp-us-east4
+
+isolate start time: 8.51 ms (user time: 4.28 ms)
+
+11/12/2025, 7:06:01 PM
+gcp-us-east4
+
+❌ [CRON 4h] Сервер вернул ошибку: 422 {"detail":[{"type":"missing","loc":["body","timeframe"],"msg":"Field required","input":{"timeframes":["4h"]}}]}
+
+11/12/2025, 7:04:01 PM
+gcp-us-east4
+
+🚀 [CRON 4h] Запуск задачи сбора данных...
+
+11/12/2025, 7:04:01 PM
+gcp-us-east4
+
+❌ [CRON FR] Сервер вернул ошибку: 404 {"detail":"Not Found"}
+
+11/12/2025, 7:02:01 PM
+gcp-us-east4
+
+🚀 [CRON FR] Запуск задачи сбора FR...
+
+11/12/2025, 7:02:01 PM
+gcp-us-east4
+
+✅ [CRON] Все 6 задач сбора данных (1h, 4h, 8h, 12h, 1d, FR) настроены.
+
+11/12/2025, 7:02:01 PM
+gcp-us-east4
+
+   Эндпоинт здоровья: GET /health
+
+11/12/2025, 7:02:01 PM
+gcp-us-east4
+
+🚀 [SERVER] Запущен на http://0.0.0.0:8000
+
+11/12/2025, 7:02:01 PM
+gcp-us-east4
+
+[INFO] Listening on https://127.0.0.1:80/
+
+11/12/2025, 7:02:01 PM
+gcp-us-east4
+
+✅ [ENV] .env загружен (локальный режим)
+
+11/12/2025, 7:02:01 PM
+gcp-us-east4
+
+isolate start time: 59.72 ms (user time: 4.07 ms)
+
+11/12/2025, 7:02:01 PM
+gcp-us-east4
+
+✅ [CRON Wake-Up] CoinSifter успешно разбужен (200 OK)
+
+11/12/2025, 7:01:50 PM
+gcp-us-east4
+
+⚠️ [CRON Wake-Up] KlineProvider ответил: 404
+
+11/12/2025, 7:00:45 PM
+gcp-us-east4
+
+❌ [CRON 1h] Сервер вернул ошибку: 422 {"detail":[{"type":"missing","loc":["body","timeframe"],"msg":"Field required","input":{"timeframes":["1h"]}}]}
+
+11/12/2025, 7:00:08 PM
+gcp-us-east4
+
+🚀 [CRON 1h] Запуск задачи сбора данных...
+
+11/12/2025, 7:00:08 PM
+gcp-us-east4
+
+⏳ [CRON Wake-Up] Задержки: CoinSifter — 106s, KlineProvider — 41s
+
+11/12/2025, 7:00:04 PM
+gcp-us-east4
+
+⏰ [CRON Wake-Up] Запуск задачи 'пробуждения'...
+
+11/12/2025, 7:00:04 PM
+gcp-us-east4
+
+✅ [CRON] Все 6 задач сбора данных (1h, 4h, 8h, 12h, 1d, FR) настроены.
+
+11/12/2025, 7:00:04 PM
+gcp-us-east4
+
+   Эндпоинт здоровья: GET /health

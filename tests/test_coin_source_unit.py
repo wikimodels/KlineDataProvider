@@ -3,7 +3,7 @@ import respx
 from httpx import Response
 from typing import List, Dict
 
-from coin_source import get_coins_from_api
+from data_collector.coin_source import get_coins_from_api
 from config import (
     COIN_SIFTER_BASE_URL,
     COIN_SIFTER_ENDPOINT_PATH,

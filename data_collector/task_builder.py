@@ -41,7 +41,7 @@ def _calculate_oi_limit(timeframe: str) -> int:
 
 def prepare_fr_tasks(coins: List[Dict]) -> List[Dict[str, Any]]:
     """
-    (Код этой функции не изменен, кроме вызова логгера)
+    Создает задачи для сбора Global Funding Rate.
     """
     tasks_to_run = []
     logger.info(f"[FR_TASK_BUILDER] Создание задач для сбора FR для {len(coins)} монет...")
@@ -55,21 +55,28 @@ def prepare_fr_tasks(coins: List[Dict]) -> List[Dict[str, Any]]:
         base_task_info = { "symbol": symbol_path, "exchange": exchange, "task_specific_timeframe": "1h" }
         data_type = 'fr'
         suffix = 'funding_rate'
+        
+        # --- ИЗМЕНЕНИЕ 1.1: Добавляем дебаггинг ---
         url_func_name = f"get_{exchange}_{suffix}_url"
         parser_func_name = f"parse_{exchange}_{data_type}"
 
         url_func = getattr(url_builder, url_func_name, None)
         parser_func = getattr(api_parser, parser_func_name, None)
 
+        logger.debug(f"[FR_TASK_BUILDER: {symbol_path}] URL func: {url_func_name}, Parser: {parser_func_name}")
+        # --- Конец Изменения 1.1 ---
+
         if not url_func or not parser_func:
             msg = f"[FR_TASK_BUILDER] Не найден {url_func_name} или {parser_func_name} для {symbol_path}"
-            # --- ИЗМЕНЕНИЕ: Используем logger.error ---
             logger.error(msg)
             continue
         
         # ... (остальная логика) ...
         strategy_func = None
+        # --- ИЗМЕНЕНИЕ 1.2: Корректный вызов URL-билдера FR (без timeframe) ---
         url = url_func(symbol_api, fr_limit)
+        # --- Конец Изменения 1.2 ---
+        
         if exchange == 'binance':
             strategy_func = fetch_strategies.fetch_simple
         elif exchange == 'bybit':
@@ -90,13 +97,12 @@ def prepare_fr_tasks(coins: List[Dict]) -> List[Dict[str, Any]]:
 
 def prepare_tasks(coins: List[Dict], timeframe: str, prefetched_fr_data: Optional[Dict] = None) -> List[Dict[str, Any]]:
     """
-    (Код этой функции ИЗМЕНЕН)
+    Готовит задачи для сбора Klines, Open Interest и Funding Rate.
     """
     tasks_to_run = []
     log_prefix = f"[{timeframe.upper()}_TASK_BUILDER]"
 
     for coin in coins:
-        # ... (логика klines, не изменилась) ...
         symbol_path = coin['symbol'].split(':')[0]
         symbol_api = symbol_path.replace('/', '')
         exchange = 'binance' if 'binance' in coin['exchanges'] else 'bybit'
@@ -109,9 +115,19 @@ def prepare_tasks(coins: List[Dict], timeframe: str, prefetched_fr_data: Optiona
         
         base_task_info = { "symbol": symbol_path, "exchange": exchange }
 
-        klines_url_func = getattr(url_builder, f"get_{exchange}_klines_url", None)
-        klines_parser_func = getattr(api_parser, f"parse_{exchange}_klines", None)
+        # 1. Klines
+        klines_url_func_name = f"get_{exchange}_klines_url"
+        klines_parser_func_name = f"parse_{exchange}_klines"
+        
+        klines_url_func = getattr(url_builder, klines_url_func_name, None)
+        klines_parser_func = getattr(api_parser, klines_parser_func_name, None)
+        
+        # --- ИЗМЕНЕНИЕ 1.3: Добавляем дебаггинг Klines ---
+        logger.debug(f"{log_prefix}: {symbol_path} (Klines): URL func: {klines_url_func_name}, Parser: {klines_parser_func_name}")
+        # --- Конец Изменения 1.3 ---
+        
         if klines_url_func and klines_parser_func:
+            # --- ИЗМЕНЕНИЕ: Klines URL-билдер ожидает (symbol_api, interval, limit) ---
             url = klines_url_func(symbol_api, api_timeframe, klines_limit)
             task_info_klines = base_task_info.copy()
             task_info_klines.update({"url": url, "data_type": "klines"})
@@ -134,10 +150,13 @@ def prepare_tasks(coins: List[Dict], timeframe: str, prefetched_fr_data: Optiona
             url_func = getattr(url_builder, url_func_name, None)
             parser_func = getattr(api_parser, parser_func_name, None)
 
+            # --- ИЗМЕНЕНИЕ 1.4: Добавляем дебаггинг OI/FR ---
+            logger.debug(f"{log_prefix}: {symbol_path} ({data_type.upper()}): URL func: {url_func_name}, Parser: {parser_func_name}")
+            # --- Конец Изменения 1.4 ---
+            
             if not url_func or not parser_func:
                 if not (data_type == 'fr' and prefetched_fr_data is not None):
                     msg = f"{log_prefix} Не найден {url_func_name} или {parser_func_name} для {symbol_path}"
-                    # --- ИЗМЕНЕНИЕ: Используем logger.error ---
                     logger.error(msg)
                 continue
             
@@ -146,10 +165,11 @@ def prepare_tasks(coins: List[Dict], timeframe: str, prefetched_fr_data: Optiona
             url = None
             
             if data_type == 'oi':
-                 # --- ИЗМЕНЕНИЕ: Используем oi_limit ---
+                 # --- ИЗМЕНЕНИЕ: OI URL-билдер ожидает (symbol_api, period, limit) ---
                  url = url_func(symbol_api, api_timeframe, oi_limit)
             elif data_type == 'fr':
                  fr_limit_url = 400
+                 # --- ИЗМЕНЕНИЕ: FR URL-билдер ожидает (symbol_api, limit) ---
                  url = url_func(symbol_api, fr_limit_url)
                  
             if exchange == 'binance':

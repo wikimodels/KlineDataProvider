@@ -1,9 +1,8 @@
-import httpx  # <--- ЗАМЕНА
+import httpx 
 import asyncio
 import logging
 from typing import List, Dict, Any, Optional
 
-# (Импорты config...)
 from config import (
     COIN_SIFTER_BASE_URL,
     COIN_SIFTER_ENDPOINT_PATH,
@@ -14,10 +13,12 @@ from config import (
 logger = logging.getLogger(__name__)
 REQUEST_TIMEOUT = 15
 
+# --- ИЗМЕНЕНИЕ: Основная функция возвращает оригинальное имя ---
 async def get_coins_from_api() -> Optional[List[Dict[str, Any]]]:
     """
     Получает список монет (symbol, exchanges) из API 'coin-sifter',
     применяет лимит и возвращает его.
+    (Название функции сохранено для совместимости с fr_fetcher.py)
     """
     
     if not COIN_SIFTER_BASE_URL or not COIN_SIFTER_API_TOKEN:
@@ -33,12 +34,9 @@ async def get_coins_from_api() -> Optional[List[Dict[str, Any]]]:
     
     logger.info(f"[COIN_SOURCE] Запрашиваю список монет из {full_url}...")
 
-    # --- ИЗМЕНЕНИЕ: Используем httpx.AsyncClient ---
     try:
         async with httpx.AsyncClient(headers=headers, timeout=REQUEST_TIMEOUT) as client:
             response = await client.get(full_url)
-            
-            # httpx.raise_for_status() - не используем, т.к. сами обрабатываем
             
             if response.status_code == 200:
                 data = response.json()
@@ -72,4 +70,8 @@ async def get_coins_from_api() -> Optional[List[Dict[str, Any]]]:
     except Exception as e:
         logger.error(f"[COIN_SOURCE] Непредвиденная ошибка при получении монет: {e}", exc_info=True)
         return None
-    # --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
+# --- НОВОЕ: Алиасы для совместимости с worker.py ---
+# worker.py импортирует эти имена
+get_coins = get_coins_from_api 
+get_coins_fr = get_coins_from_api

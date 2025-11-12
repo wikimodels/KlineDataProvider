@@ -223,7 +223,7 @@ version = "5.0.1"
 description = "Timeout context manager for asyncio programs"
 optional = false
 python-versions = ">=3.8"
-groups = ["dev"]
+groups = ["main", "dev"]
 markers = "python_version == \"3.11\" and python_full_version < \"3.11.3\""
 files = [
     {file = "async_timeout-5.0.1-py3-none-any.whl", hash = "sha256:39e3809566ff85354557ec2398b55e096c8364bacac9405a7a1fa429e77fe76c"},
@@ -2368,7 +2368,7 @@ version = "7.0.1"
 description = "Python client for Redis database and key-value store"
 optional = false
 python-versions = ">=3.9"
-groups = ["dev"]
+groups = ["main", "dev"]
 files = [
     {file = "redis-7.0.1-py3-none-any.whl", hash = "sha256:4977af3c7d67f8f0eb8b6fec0dafc9605db9343142f634041fb0235f67c0588a"},
     {file = "redis-7.0.1.tar.gz", hash = "sha256:c949df947dca995dc68fdf5a7863950bf6df24f8d6022394585acc98e81624f1"},
@@ -2774,21 +2774,6 @@ files = [
     {file = "ujson-5.11.0-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:416389ec19ef5f2013592f791486bef712ebce0cd59299bf9df1ba40bb2f6e04"},
     {file = "ujson-5.11.0.tar.gz", hash = "sha256:e204ae6f909f099ba6b6b942131cee359ddda2b6e4ea39c12eb8b991fe2010e0"},
 ]
-
-[[package]]
-name = "upstash-redis"
-version = "1.5.0"
-description = "Serverless Redis SDK from Upstash"
-optional = false
-python-versions = "<4.0,>=3.8"
-groups = ["main"]
-files = [
-    {file = "upstash_redis-1.5.0-py3-none-any.whl", hash = "sha256:e08de1f74d3fb48a81b383c00398cc9336c43b65b82e6d9266312143970800b9"},
-    {file = "upstash_redis-1.5.0.tar.gz", hash = "sha256:1917d4d009ca803815092892d92c7da9138b4ada6b353974fb74caf063c6d2a3"},
-]
-
-[package.dependencies]
-httpx = ">=0.23.0,<1"
 
 [[package]]
 name = "urllib3"
@@ -3233,4 +3218,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "3dbda83c49f3e6f900e192bd95c2c3b7fcdd495745bbf339eeb22de1444043e0"
+content-hash = "ab4e44557975503aec212fb4a019bddbb9248bef778259e5e547707c37d66ea2"
