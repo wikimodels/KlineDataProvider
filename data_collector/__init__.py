@@ -176,13 +176,15 @@ async def fetch_market_data(
     logger.info(f"{log_prefix} 5/6: Объединение данных завершено за {end_merge_time - start_merge_time:.2f} сек.")
 
     
-    # --- ИЗМЕНЕНИЕ: Пропускаем форматирование, если skip_formatting=True ---
+    # --- ИЗМЕНЕНИЕ №1: Переносим 'skip_formatting' ДО шага 6 ---
+    # (Это нужно, чтобы worker.py мог получить ПОЛНЫЕ (800 свечей) merged_data
+    # для '4h' ПЕРЕД тем, как 'format_final_structure' их обрежет)
     if skip_formatting:
         logger.info(f"{log_prefix} 6/6: Пропускаю финальное форматирование (skip_formatting=True). Возвращаю 'merged_data'.")
         end_total_time = time.time()
         logger.info(f"{log_prefix} --- Цикл сбора данных (raw) завершен за {end_total_time - start_total_time:.2f} сек. ---")
         return merged_data 
-    # ------------------------------------------------------------------
+    # --- КОНЕЦ ИЗМЕНЕНИЯ №1 ---
 
 
     # 6. Финальное форматирование

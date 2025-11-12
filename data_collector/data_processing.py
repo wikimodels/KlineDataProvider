@@ -100,7 +100,10 @@ def format_final_structure(market_data: Dict[str, list], coins: List[Dict], time
         if not candles:
             continue
 
-        # --- ИЗМЕНЕНИЕ: Обрезка свечей (399) ---
+        # --- ИЗМЕНЕНИЕ №1: '4h' (как и '8h') не должен обрезаться (:-1) ---
+        # (Это нужно, чтобы _verify_8h_aggregation_logic в test_cache_freshness.py
+        # мог корректно сравнить 4h и 8h кэши, которым нужна "живая" свеча 4h)
+        # --- ОТМЕНА ИЗМЕНЕНИЯ: Возвращаем к оригинальной логике (ОБРЕЗАЕМ ВСЕ) ---
         
         # Для 8h данные УЖЕ агрегированы и полны. Обрезка [:-1] не нужна.
         if timeframe == '8h':
@@ -108,9 +111,16 @@ def format_final_structure(market_data: Dict[str, list], coins: List[Dict], time
         else:
             # Для 1h, 4h и т.д. - удаляем последнюю (неполную) свечу
             candles_completed = candles[:-1]
-            
-        final_candles = candles_completed[-399:]
-        # --- КОНЕЦ ИЗМЕНЕНИЯ ---
+        
+        # --- ИЗМЕНЕНИЕ №1: (РЕАЛИЗАЦИЯ 799 -> 399) ---
+        # Обрезаем ВСЕ (1h, 8h, 12h, 1d) до 399
+        # КРОМЕ 4h, который должен остаться 799
+        
+        if timeframe == '4h':
+            final_candles = candles_completed # (Оставляем все 799)
+        else:
+            final_candles = candles_completed[-399:] # (Обрезаем до 399)
+        # --- КОНЕЦ ИЗМЕНЕНИЯ №1 ---
         # ------------------------------------
 
         if not final_candles:

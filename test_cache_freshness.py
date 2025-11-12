@@ -1,3 +1,4 @@
+# test_cache_freshness.py
 import httpx
 import asyncio
 import sys
@@ -245,17 +246,26 @@ async def run_freshness_test():
                     continue
                 
                 log.info(f"       (Проверка {min(len(coins_data_list), 10)} из {len(coins_data_list)} монет...)")
+                
+                # --- ИЗМЕНЕНИЕ: Определяем ожидаемое количество свечей ---
+                if key == '4h':
+                    expected_max_candles = 799 # Для 4h может быть до 799 свечей (например, при агрегации 8h)
+                else:
+                    expected_max_candles = 399 # Для других таймфреймов - до 399
+                
                 for coin_data in coins_data_list[:10]:
                     symbol = coin_data.get("symbol", "N/A")
                     candle_count = len(coin_data.get("data", []))
-                    if candle_count > 399:
-                         log.error(f"       💥 [СБОЙ] {symbol}: Найдено {candle_count} свечей (Ожидалось <= 399).")
+                    
+                    # --- ИЗМЕНЕНИЕ: Проверяем количество свечей с учетом таймфрейма ---
+                    if candle_count > expected_max_candles:
+                         log.error(f"       💥 [СБОЙ] {symbol}: Найдено {candle_count} свечей (Ожидалось <= {expected_max_candles} для '{key}').")
                          all_fresh_and_valid = False
                     elif candle_count == 0:
                          log.error(f"       💥 [СБОЙ] {symbol}: Найдено 0 свечей (Ожидалось > 0).")
                          all_fresh_and_valid = False
                     else:
-                        log.info(f"       ✅ [OK] {symbol}: {candle_count} свечей.")
+                        log.info(f"       ✅ [OK] {symbol}: {candle_count} свечей (<= {expected_max_candles} для '{key}').")
 
             except Exception as e:
                 log.error(f"💥 [FAIL] Ошибка при проверке 'cache:{key}': {e}", exc_info=True)

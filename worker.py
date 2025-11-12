@@ -132,6 +132,7 @@ async def _get_and_process_task_from_queue(redis_conn: AsyncRedis) -> bool:
         return True
 
     # --- ИЗМЕНЕНИЕ №3: Инициализируем AlertStorage ---
+    # (Он нужен для `run_alert_checks`, который вызывается для '1h')
     storage = AlertStorage(redis_conn)
     # --- КОНЕЦ ИЗМЕНЕНИЯ №3 ---
 
@@ -149,6 +150,7 @@ async def _get_and_process_task_from_queue(redis_conn: AsyncRedis) -> bool:
             logger.error(f"{log_prefix} ❌ Не удалось получить список монет. all_coins = {all_coins}")
             return True
         
+        # --- (ОРИГИНАЛЬНАЯ ЛОГИКА 8h (399 -> 199) - СОХРАНЕНА) ---
         if timeframe == '8h':
             logger.info(f"{log_prefix} Проверка зависимости: загрузка 'cache:4h'...")
             data_4h = await load_from_cache('4h', redis_conn=redis_conn)
@@ -161,6 +163,7 @@ async def _get_and_process_task_from_queue(redis_conn: AsyncRedis) -> bool:
             
             logger.info(f"{log_prefix} Запуск агрегации 4h->8h...")
             
+            # (Передаем 399 свечей 4h, чтобы получить ~199 свечей 8h)
             await generate_and_save_8h_cache(data_4h.get('data'), all_coins)
             
             logger.info(f"{log_prefix} Агрегация 4h->8h завершена.")
@@ -174,7 +177,6 @@ async def _get_and_process_task_from_queue(redis_conn: AsyncRedis) -> bool:
                 logger.warning(f"{log_prefix} ⚠️ Не получено данных Klines для {timeframe}.")
                 return True
                 
-            logger.info(f"{log_prefix} Используем данные Klines напрямую (без агрегации).")
             final_data = klines_data
             
     except Exception as e:

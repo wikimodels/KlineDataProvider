@@ -20,11 +20,7 @@ logger = logging.getLogger(__name__)
 from worker import main 
 from api_routes import router as api_router
 
-# --- ИЗМЕНЕНИЕ №1: 'run_fr_update_process' удален, т.к. он больше не используется при старте ---
-# try:
-#     from data_collector.fr_fetcher import run_fr_update_process
-# ... (и т.д.)
-
+ 
 
 # --- 3. Обработчик Lifespan ---
 @asynccontextmanager
@@ -72,4 +68,4 @@ if __name__ == "__main__":
         port=8000, 
         reload=False,
         log_config=None
-    ))
+    )

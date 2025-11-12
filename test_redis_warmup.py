@@ -1,3 +1,4 @@
+# test_redis_warmup.py
 import httpx
 import asyncio
 import sys
@@ -9,8 +10,7 @@ from dotenv import load_dotenv
 from typing import List, Dict, Any, Optional
 from cache_manager import get_redis_connection
 from redis.asyncio import Redis as AsyncRedis 
-from config import REDIS_TASK_QUEUE_KEY, WORKER_LOCK_KEY, WORKER_LOCK_VALUE
-
+from config import REDIS_TASK_QUEUE_KEY, WORKER_LOCK_KEY, WORKER_LOCK_VALUE # Добавлен WORKER_LOCK_VALUE
 
 # --- 1. Загрузка конфигурации из .env ---
 load_dotenv()  
@@ -25,7 +25,9 @@ MAX_CACHE_WAIT_SEC = 60
 # -----------------
 
 # --- Задачи для "прогрева" ---
+# --- ИЗМЕНЕНИЕ №1: '8h' ВОЗВРАЩЕН в список (он запускается ОТДЕЛЬНО) ---
 TASKS_TO_RUN = ["global_fr", "1h", "4h", "8h", "12h", "1d"] 
+# --- КОНЕЦ ИЗМЕНЕНИЯ №1 ---
 CACHE_KEYS_TO_VALIDATE = ["global_fr", "1h", "4h", "8h", "12h", "1d"]
 # ---------------------------
 
@@ -51,7 +53,7 @@ EXPECTED_COIN_DATA_KEYS = [
 
 
 async def _cleanup_all_cache_keys(redis_conn: AsyncRedis, log_prefix: str):
-    """Принудительно удаляет все ключи кэша (cache:*) перед тестом."""
+    """(Код не изменен)"""
     log.info(f"{log_prefix} --- ПРИНУДИТЕЛЬНАЯ ОЧИСТКА КЭША (cache:*) ---")
     
     try:
@@ -80,10 +82,7 @@ async def _cleanup_all_cache_keys(redis_conn: AsyncRedis, log_prefix: str):
 
 
 async def wait_for_cache_to_appear(client: httpx.AsyncClient, cache_key: str, redis_conn: AsyncRedis) -> bool:
-    """
-    Опрашивает Redis напрямую, пока не появится кэш.
-    Возвращает True если появился, False если таймаут.
-    """
+    """(Код не изменен)"""
     log.info(f"[CACHE_WAIT] 🔍 Ожидаю появления 'cache:{cache_key}' в Redis (макс {MAX_CACHE_WAIT_SEC} сек)...")
     start_time = time.time()
     
@@ -113,12 +112,8 @@ async def wait_for_cache_to_appear(client: httpx.AsyncClient, cache_key: str, re
             await asyncio.sleep(CACHE_POLL_INTERVAL_SEC)
 
 
-# --- ИЗМЕНЕНИЕ №1 и №2: Полная переработка логики ожидания ---
 async def wait_for_worker_to_be_free(redis_conn: AsyncRedis, task_name: str):
-    """
-    Опрашивает Redis, используя двухфазную проверку,
-    чтобы убедиться, что НАШ воркер (lock='processing') взял и завершил задачу.
-    """
+    """(Код не изменен - двухфазная проверка)"""
     log.info(f"--- Ожидаю завершения задачи '{task_name}' (опрос Redis {WORKER_LOCK_KEY} каждые {POLL_INTERVAL_SEC} сек)...")
     max_wait_time_sec = MAX_WAIT_MINUTES_PER_TASK * 60
     
@@ -126,9 +121,6 @@ async def wait_for_worker_to_be_free(redis_conn: AsyncRedis, task_name: str):
         log.error("💥 [FAIL] Не удалось подключиться к Redis. Проверка блокировки невозможна.")
         raise ConnectionError("Redis недоступен в wait_for_worker_to_be_free")
         
-    # --- ИЗМЕНЕНИЕ №2: Специальная логика для 'init_check' ---
-    # (Мы не можем ждать 'processing', т.к. задача еще не отправлена.
-    # Мы просто ждем, пока все "зомби" (если они есть) не уйдут)
     if task_name == "init_check":
         log.info("... [init_check] Ожидаю, пока ЛЮБАЯ блокировка не будет снята (Фаза 2)...")
         phase1_start_time = time.time()
@@ -149,7 +141,6 @@ async def wait_for_worker_to_be_free(redis_conn: AsyncRedis, task_name: str):
                 await asyncio.sleep(POLL_INTERVAL_SEC)
         
         raise TimeoutError(f"Таймаут [init_check]! Блокировка не была снята за {max_wait_time_sec} сек.")
-    # --- КОНЕЦ ИЗМЕНЕНИЯ №2 ---
 
     # --- Фаза 1: Ждем, пока НАШ воркер (processing) ЗАХВАТИТ задачу ---
     log.info(f"... Фаза 1: Ожидаю, пока '{WORKER_LOCK_VALUE}' не появится в {WORKER_LOCK_KEY} (Макс {max_wait_time_sec} сек)...")
@@ -166,11 +157,9 @@ async def wait_for_worker_to_be_free(redis_conn: AsyncRedis, task_name: str):
                 task_taken = True
                 break
             elif lock_status is not None:
-                # --- Это "фантомный" лок (например, busy_by_...) ---
                 log.warning(f"... [Фаза 1] 'Фантомный' воркер занят (Lock='{lock_status}'). Жду, пока он освободит...")
                 await asyncio.sleep(POLL_INTERVAL_SEC)
             else:
-                # Lock is None,
                 log.info(f"... [Фаза 1] Воркер свободен (Lock=None). Ожидаю захвата задачи '{task_name}'... Жду {POLL_INTERVAL_SEC} сек...")
                 await asyncio.sleep(POLL_INTERVAL_SEC)
 
@@ -202,13 +191,10 @@ async def wait_for_worker_to_be_free(redis_conn: AsyncRedis, task_name: str):
             await asyncio.sleep(POLL_INTERVAL_SEC)
 
     raise TimeoutError(f"Таймаут Фазы 2! НАШ воркер (lock='{WORKER_LOCK_VALUE}') не освободил задачу '{task_name}' за {max_wait_time_sec} сек.")
-# --- КОНЕЦ ИЗМЕНЕНИЯ №1 ---
 
 
 async def post_task(client: httpx.AsyncClient, task_name: str, redis_conn: AsyncRedis):
-    """
-    Отправляет 1 задачу (Klines или FR) на сервер.
-    """
+    """(Код не изменен)"""
     if task_name == "global_fr":
         if not SECRET_TOKEN: 
             log.error("💥 [FAIL] SECRET_TOKEN не найден в .env. Не могу запустить задачу 'global_fr'.")
@@ -235,72 +221,52 @@ async def post_task(client: httpx.AsyncClient, task_name: str, redis_conn: Async
 
 
 def validate_cache_data(data: dict, key: str):
-    """
-    Валидация данных из кеша без вывода больших объемов данных в логи
-    """
+    """(Код не изменен)"""
     log.info(f"--- 🔬 Валидация данных для 'cache:{key}' ---")
     
-    # 1. Проверка 'global_fr'
     if key == 'global_fr':
         data = data.get('data', {})
         if not isinstance(data, dict):
             raise ValueError(f"'global_fr' должен быть словарем (dict) после распаковки")
-        
         if not data:
             log.warning(f"Validation WARNING: 'cache:{key}' пуст (нет данных).")
             return
-            
         first_key = list(data.keys())[0]
         first_value = data[first_key]
-        
         if not isinstance(first_key, str):
             raise ValueError("Ключ в 'global_fr' должен быть строкой (символом)")
-        
         if not isinstance(first_value, list):
             raise ValueError("Значение в 'global_fr' должно быть списком (list)")
-        
         if not first_value:
              log.warning(f"Validation WARNING: 'cache:{key}' содержит пустой список для {first_key}.")
              return
-        
         if "openTime" not in first_value[0]:
             raise ValueError("Отсутствует 'openTime' в данных global_fr")
-        
         if "fundingRate" not in first_value[0]:
             raise ValueError("Отсутствует 'fundingRate' в данных global_fr")
-        
         log.info(f"✅ [OK] Валидация для 'cache:{key}' прошла успешно.")
         return
 
-    # 2. Проверка Klines (1h, 4h, 8h, 12h, 1d)
     for top_key in EXPECTED_TOP_LEVEL_KEYS:
         if top_key not in data:
             raise ValueError(f"Отсутствует ключ верхнего уровня '{top_key}' в ответе {key}")
-    
     if data["timeframe"] != key:
         raise ValueError(f"Timeframe не совпадает: ожидался {key}, получен {data['timeframe']}")
-    
     if not isinstance(data["data"], list):
         raise ValueError(f"'data' должен быть списком, получен {type(data['data'])}")
-    
     if not data["data"]:
         log.warning(f"Validation WARNING: 'cache:{key}' содержит пустой список 'data'. Аудит: {data['audit_report']}")
         return
-
     log.info(f"Найдено {len(data['data'])} монет в 'data' (проверяем первую).")
-
     coin_data = data["data"][0]
     for coin_key in EXPECTED_COIN_DATA_KEYS:
         if coin_key not in coin_data:
             raise ValueError(f"Отсутствует ключ '{coin_key}' в coin_data (data[0])")
-    
     if not isinstance(coin_data["data"], list):
         raise ValueError(f"coin_data['data'] должен быть списком")
-    
     if len(coin_data["data"]) == 0:
         raise ValueError(f"Список 'data' внутри монеты {coin_data['symbol']} пуст")
 
-    # 3. Проверка ПОСЛЕДНЕЙ свечи
     candle = coin_data["data"][-1]
     open_time = candle.get('openTime', 'UNKNOWN')
     log.info(f"Проверяем ключи ПОСЛЕДНЕЙ свечи (OpenTime: {open_time})...")
@@ -308,13 +274,10 @@ def validate_cache_data(data: dict, key: str):
     for candle_key in EXPECTED_CANDLE_KEYS:
         if candle_key not in candle:
             raise ValueError(f"Отсутствует обязательный ключ Klines '{candle_key}' в свече")
-    
     if "openInterest" not in candle:
         raise ValueError("Отсутствует ключ 'openInterest' (может быть None)")
-    
     if "fundingRate" not in candle:
         raise ValueError("Отсутствует ключ 'fundingRate' (может быть None)")
-
     log.info(f"✅ [OK] Валидация для 'cache:{key}' прошла успешно.")
 
 
@@ -345,7 +308,6 @@ async def run_cache_warmup():
             return
 
         try:
-            # --- ИЗМЕНЕНИЕ №2: Этот вызов теперь ждет, пока ВСЕ (включая зомби) не закончат ---
             await wait_for_worker_to_be_free(redis_conn, "init_check") 
             log.info("--- (Воркер свободен. Начинаем) ---")
         except TimeoutError as e:
@@ -361,16 +323,18 @@ async def run_cache_warmup():
             try:
                 await post_task(client, task, redis_conn)
                 
-                # --- ИЗМЕНЕНИЕ №1: Этот вызов теперь ЖДЕТ, пока НАШ воркер не ЗАВЕРШИТ ---
                 await wait_for_worker_to_be_free(redis_conn, task)
                 
+                # --- ИЗМЕНЕНИЕ №2: УДАЛЕНА ошибочная логика 'if task == '4h':' ---
+                # (Возвращена стандартная проверка для ВСЕХ задач)
                 log.info(f"[POST_TASK] ⏳ Задача '{task}' обработана воркером. Ожидаю сохранения в Redis...")
                 cache_appeared = await wait_for_cache_to_appear(client, task, redis_conn)
-                
+            
                 if not cache_appeared:
                     log.error(f"[POST_TASK] ❌ Кэш '{task}' НЕ появился в Redis за {MAX_CACHE_WAIT_SEC} сек!")
                     log.error("Прогрев кэша прерван.")
                     return
+                # --- КОНЕЦ ИЗМЕНЕНИЯ №2 ---
                 
                 task_end_time = time.time()
                 log.info(f"--- ✅ Задача '{task}' УСПЕШНО ЗАВЕРШЕНА за {(task_end_time - task_start_time):.2f} сек. ---")

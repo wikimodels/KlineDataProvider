@@ -109,7 +109,7 @@ def prepare_tasks(coins: List[Dict], timeframe: str, prefetched_fr_data: Optiona
         api_timeframe = '4h' if timeframe == '8h' else timeframe
         
         # --- ИЗМЕНЕНИЕ: Klines limit ВОССТАНОВЛЕН ---
-        klines_limit = 800 if timeframe in ['4h', '8h'] else 400
+        klines_limit = 800 if timeframe in ['4h'] else 400
         # --- ИЗМЕНЕНИЕ: OI limit ДИНАМИЧЕСКИЙ ---
         oi_limit = _calculate_oi_limit(api_timeframe)
         
